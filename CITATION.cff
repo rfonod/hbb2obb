@@ -10,7 +10,7 @@ authors:
     orcid: 'https://orcid.org/0000-0002-9434-3156'
 identifiers:
   - type: doi
-    value: XXX
+    value: 10.5281/zenodo.15151143
     description: Zenodo archive
 repository-code: 'https://github.com/rfonod/hbb2obb'
 url: 'https://github.com/rfonod/hbb2obb'
