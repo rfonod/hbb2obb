@@ -1,0 +1,94 @@
+# ==============================================================
+# HBB2OBB - MIT License
+# ==============================================================
+# Overview:
+# This pyproject.toml file configures the build system and 
+# project metadata for the HBB2OBB package. 
+#
+# Installation:
+# To install HBB2OBB package from PyPI, use the following command:
+#   pip install hbb2obb
+#
+# For development purposes, enabling real-time updates without 
+# reinstallation, clone the repository and install the package
+# in editable mode with the following command:
+#   pip install -e .[dev]
+# or for zsh shell:
+#   pip install -e '.[dev]'
+#
+# ==============================================================
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hbb2obb"
+dynamic = ["version"]
+description = "Toolkit for converting horizontal bounding boxes to oriented bounding boxes using segmentation models and evaluation of the conversion against ground truth."
+authors = [
+    { name = "Robert Fonod", email = "robert.fonod@ieee.org" },
+]
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+keywords = ["bounding-box", "oriented-bounding-box", "rotated-bounding-box", "horizontal-bounding-box", "axis-aligned-bounding-box", "object detection", "segmentation", "evaluation", "computer-vision", "aerial-imagery", "drone-footage", "remote-sensing", "annotation-tools", "label-conversion", "YOLO-format", "COCO-format", "evaluation-metrics", "iou-evaluation", "hyperparameter-optimization"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",    
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development",
+]
+
+dependencies = [
+    "ultralytics>=8.3",
+    "shapely>=2.0.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.11.0",
+]
+
+[project.scripts]
+hbb2obb = "hbb2obb.cli:main_hbb2obb"
+hbb2obb-eval = "hbb2obb.cli:main_hbb2obb_eval"
+
+[tool.setuptools] 
+packages = { find = { where = ["."], include = ["hbb2obb", "hbb2obb.*"] } }
+
+[tool.setuptools.dynamic]
+version = { attr = "hbb2obb.__version__" }
+
+[project.urls]
+Homepage = "https://github.com/rfonod/hbb2obb/"
+Repository = "https://github.com/rfonod/hbb2obb/"
+Changelog = "https://github.com/rfonod/hbb2obb/releases"
+Issues = "https://github.com/rfonod/hbb2obb/issues/"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ['E', 'F', 'W', 'A', "B", 'PLC', 'PLE', 'PLW', 'I']
+
+[tool.ruff.format]
+docstring-code-format = true
+quote-style = "preserve"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra"
+testpaths = [
+    "tests",
+]

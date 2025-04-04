@@ -1,0 +1,57 @@
+run_name: sam_l-sam_b-sam2_b-sam2.1_b-mobile_sam
+img_source: data/images
+gt_dir: data/labels_obb_gt
+hbb_dir: data/labels_hbb
+sam_models:
+- sam_l
+- sam_b
+- sam2_b
+- sam2.1_b
+- mobile_sam
+scale_factors:
+- -0.01
+- 0
+- 0.01
+- 0.02
+- 0.03
+- 0.04
+- 0.05
+- 0.06
+- 0.07
+- 0.08
+- 0.09
+- 0.1
+imgsz:
+- 640
+- 960
+- 1280
+excluded_classes: []
+iou_threshold: 0.1
+class_agnostic: false
+model_kwargs: null
+system_metadata:
+  start_date: '2025-04-03'
+  start_time: '23:12:25.981'
+  os:
+    system: Linux
+    platform: Linux-6.8.0-55-generic-x86_64-with-glibc2.39
+    release: 6.8.0-55-generic
+    version: '#57-Ubuntu SMP PREEMPT_DYNAMIC Wed Feb 12 23:42:21 UTC 2025'
+  software:
+    python: 3.11.11
+    python_full: 3.11.11 (main, Dec 11 2024, 16:28:39) [GCC 11.2.0]
+    hbb2obb: 1.0.0
+    ultralytics: 8.3.99
+    opencv: 4.11.0.86
+    numpy: 2.1.1
+    torch: 2.6.0
+  hardware:
+    architecture: x86_64
+    processor: x86_64
+    cpu_cores: 24 core(s)
+    ram: 62.50 GB
+    gpu: 1 device(s)
+    gpu_name:
+    - NVIDIA GeForce RTX 4090
+    gpu_memory:
+    - 23.64 GB

@@ -1,0 +1,49 @@
+Benchmark Run: sam_b
+End Time: 2025-04-03 22:01:40
+
+BEST PARAMETERS:
+  Image Size: 1280
+  Scale Factor: 0.0500
+  Average IoU: 0.8982 ± 0.0710
+  Total Matches: 201
+  Total GT: 201
+  Total Pred: 201
+  Execution Time: 10.55 seconds
+
+ALL RESULTS (sorted by Average IoU):
+   1. ImgSz:  1280, SF:  0.0500, IoU:  0.8982 ±  0.0710, Time: 10.55s
+   2. ImgSz:  1280, SF:  0.0400, IoU:  0.8972 ±  0.0703, Time: 10.44s
+   3. ImgSz:  1280, SF:  0.0600, IoU:  0.8959 ±  0.0713, Time: 10.41s
+   4. ImgSz:  1280, SF:  0.0300, IoU:  0.8952 ±  0.0671, Time: 10.50s
+   5. ImgSz:  1280, SF:  0.0700, IoU:  0.8934 ±  0.0720, Time: 10.45s
+   6. ImgSz:  1280, SF:  0.0200, IoU:  0.8915 ±  0.0659, Time: 10.38s
+   7. ImgSz:  1280, SF:  0.0800, IoU:  0.8908 ±  0.0733, Time: 10.48s
+   8. ImgSz:  1280, SF:  0.0900, IoU:  0.8887 ±  0.0728, Time: 10.45s
+   9. ImgSz:  1280, SF:  0.0100, IoU:  0.8858 ±  0.0630, Time: 10.37s
+  10. ImgSz:  1280, SF:  0.1000, IoU:  0.8839 ±  0.0730, Time: 10.47s
+  11. ImgSz:  1280, SF:  0.0000, IoU:  0.8767 ±  0.0610, Time: 10.42s
+  12. ImgSz:  1280, SF: -0.0100, IoU:  0.8664 ±  0.0610, Time: 10.37s
+  13. ImgSz:   960, SF:  0.0200, IoU:  0.8596 ±  0.0784, Time: 10.16s
+  14. ImgSz:   960, SF:  0.0300, IoU:  0.8594 ±  0.0806, Time: 10.11s
+  15. ImgSz:   960, SF:  0.0100, IoU:  0.8570 ±  0.0781, Time: 10.11s
+  16. ImgSz:   960, SF:  0.0400, IoU:  0.8563 ±  0.0829, Time: 10.25s
+  17. ImgSz:   960, SF:  0.0000, IoU:  0.8516 ±  0.0729, Time: 10.19s
+  18. ImgSz:   960, SF:  0.0500, IoU:  0.8504 ±  0.0825, Time: 10.13s
+  19. ImgSz:   960, SF:  0.0600, IoU:  0.8446 ±  0.0831, Time: 10.13s
+  20. ImgSz:   960, SF: -0.0100, IoU:  0.8419 ±  0.0709, Time: 10.06s
+  21. ImgSz:   960, SF:  0.0700, IoU:  0.8374 ±  0.0829, Time: 10.14s
+  22. ImgSz:   960, SF:  0.0800, IoU:  0.8311 ±  0.0822, Time: 10.23s
+  23. ImgSz:   960, SF:  0.0900, IoU:  0.8250 ±  0.0836, Time: 10.15s
+  24. ImgSz:   960, SF:  0.1000, IoU:  0.8202 ±  0.0839, Time: 12.22s
+  25. ImgSz:   640, SF:  0.0100, IoU:  0.8028 ±  0.1108, Time:  9.91s
+  26. ImgSz:   640, SF:  0.0000, IoU:  0.8021 ±  0.1061, Time:  9.94s
+  27. ImgSz:   640, SF:  0.0200, IoU:  0.8014 ±  0.1107, Time: 10.06s
+  28. ImgSz:   640, SF:  0.0300, IoU:  0.7967 ±  0.1114, Time: 10.00s
+  29. ImgSz:   640, SF: -0.0100, IoU:  0.7933 ±  0.1003, Time:  9.95s
+  30. ImgSz:   640, SF:  0.0400, IoU:  0.7889 ±  0.1111, Time: 10.02s
+  31. ImgSz:   640, SF:  0.0500, IoU:  0.7771 ±  0.1079, Time:  9.97s
+  32. ImgSz:   640, SF:  0.0600, IoU:  0.7657 ±  0.1039, Time: 10.11s
+  33. ImgSz:   640, SF:  0.0700, IoU:  0.7555 ±  0.0998, Time: 10.01s
+  34. ImgSz:   640, SF:  0.0800, IoU:  0.7435 ±  0.0970, Time: 10.03s
+  35. ImgSz:   640, SF:  0.0900, IoU:  0.7326 ±  0.0953, Time: 10.03s
+  36. ImgSz:   640, SF:  0.1000, IoU:  0.7209 ±  0.0925, Time: 10.13s
