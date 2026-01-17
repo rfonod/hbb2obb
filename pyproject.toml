@@ -50,7 +50,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "ultralytics>=8.3",
+    "ultralytics>=8.3.237",
     "shapely>=2.0.7",
 ]
 
