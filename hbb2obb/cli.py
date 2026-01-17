@@ -25,6 +25,7 @@ SUPPORTED_SAM_MODELS = [
     "sam2.1_t",
     "sam2.1_s",
     "sam2.1_b",
+    "sam3",
     "FastSAM-s",
     "FastSAM-x",
 ]
