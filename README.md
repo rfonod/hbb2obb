@@ -19,12 +19,11 @@ Beyond conversion, HBB2OBB offers comprehensive evaluation tools to assess OBB a
 - **Evaluation Tools**: Includes tools to evaluate OBB accuracy against ground truth using IoU metrics
 - **Hyperparameter Optimization Tool**: Finds optimal hyperparameters for HBB2OBB conversion by evaluating different combinations of SAM inference resolutions and scale factors used to enlarge/shrink HBBs
 - **Visualization Tools**: Tools to visualize the conversion process, including HBBs, segmentation masks, derived contours, and the resulting OBBs, as well as the evaluation results
-- **Format Conversion Utilities**: Tools to convert between COCO JSON and YOLO TXT formats for both HBB and OBB annotations
+- **Format Conversion Utilities**: Tools to convert between LabelMe/COCO/Pascal VOC annotations and YOLO TXT format
 
 <details>
 <summary><b>🚀 Planned Enhancements</b></summary>
 
-   - **Support for Other Formats**: Add support for other annotation formats (e.g., COCO, Pascal VOC)
    - **Improved Morphological Operations**: Implement more advanced morphological operations for better mask refinement
    - **Integration with Other Libraries**: Integrate with popular object detection libraries to alleviate the need for HBB annotations
    - **Support for Other Segmentation Models**: Extend compatibility to other segmentation models
@@ -234,13 +233,29 @@ print_results(results, "/path/to/label_map.yaml")
 
 ### Format Conversion
 
-**COCO JSON to YOLO TXT** (supports both HBB and OBB annotations):
+**JSON to YOLO TXT** (LabelMe format; supports both HBB and OBB annotations):
 
 ```bash
-python scripts/json2yolo.py /path/to/json -mp /path/to/label_map.yaml
+python scripts/json2yolo.py /path/to/json_dir -mp /path/to/label_map.yaml
 ```
 
-The `-mp` flag is optional and can be used to specify a label map file. If not provided, the script will create a default (first-come-first-serve) label map.
+The `-mp` flag is optional and can be used to specify a label map file. If not provided, the script will create a default (first-come-first-serve) label map. This is the default mode and reads LabelMe-format JSON files (each containing `imageHeight`, `imageWidth`, and `shapes` keys) from a directory.
+
+> **Note:** This script was previously labeled *COCO JSON to YOLO TXT* in the README (inaccurately, since the JSON format it reads is LabelMe-specific, not the official COCO instance annotation format). The HBB and OBB support has **not** changed—it is still fully supported in this mode.
+
+**COCO JSON to YOLO TXT** (official COCO instance annotation format; HBB annotations only):
+
+```bash
+python scripts/json2yolo.py /path/to/instances.json --input_format coco -td /path/to/labels_yolo
+```
+
+This mode reads an official COCO instance annotation JSON file (`images`, `annotations`, `categories` keys) and outputs YOLO HBB text files. OBB is not supported in this mode because the COCO format uses axis-aligned bounding boxes only.
+
+**Pascal VOC XML to YOLO TXT** (HBB annotations):
+
+```bash
+python scripts/voc2yolo.py /path/to/voc_xml_dir -td /path/to/labels_yolo
+```
 
 **YOLO TXT to COCO JSON** (supports both HBB and OBB annotations):
 

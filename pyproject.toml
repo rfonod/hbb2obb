@@ -19,7 +19,7 @@
 # ==============================================================
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=78.1.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -30,12 +30,12 @@ authors = [
     { name = "Robert Fonod", email = "robert.fonod@ieee.org" },
 ]
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 keywords = ["bounding-box", "oriented-bounding-box", "rotated-bounding-box", "horizontal-bounding-box", "axis-aligned-bounding-box", "object detection", "segmentation", "evaluation", "computer-vision", "aerial-imagery", "drone-footage", "remote-sensing", "annotation-tools", "label-conversion", "YOLO-format", "COCO-format", "evaluation-metrics", "iou-evaluation", "hyperparameter-optimization"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -52,6 +52,8 @@ classifiers = [
 dependencies = [
     "ultralytics>=8.3.237",
     "shapely>=2.0.7",
+    "tqdm>=4.64.0",
+    "pandas>=3.0.2",
 ]
 
 [project.optional-dependencies]
