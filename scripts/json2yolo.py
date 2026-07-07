@@ -46,6 +46,8 @@ Output format:
     - OBB: <label> <x1> <y1> <x2> <y2> <x3> <y3> <x4> <y4>
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 from collections import defaultdict
