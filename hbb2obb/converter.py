@@ -10,6 +10,33 @@ from ultralytics import SAM, FastSAM
 
 from hbb2obb.utils import Annotations, get_hbb_dir
 
+# Cache of loaded SAM/FastSAM model instances, keyed by the resolved weights path, so that
+# repeated hbb2obb() calls (e.g. one per image in a directory) reuse an already-loaded model
+# instead of reconstructing it from disk on every call.
+_MODEL_CACHE: Dict[str, Any] = {}
+
+
+def load_sam_model(model_name: str):
+    """
+    Load a SAM/FastSAM model by name, reusing a cached instance when one is already loaded.
+
+    Args:
+        model_name: Model name (e.g. "sam_b", "sam2.1_b", "FastSAM-s"), with or without a ".pt" suffix.
+
+    Returns:
+        The loaded ultralytics SAM or FastSAM model instance.
+    """
+    model_path = Path('models') / (model_name if model_name.endswith(".pt") else f"{model_name}.pt")
+    cache_key = str(model_path)
+    if cache_key not in _MODEL_CACHE:
+        _MODEL_CACHE[cache_key] = FastSAM(model_path) if "FastSAM" in model_name else SAM(model_path)
+    return _MODEL_CACHE[cache_key]
+
+
+def clear_model_cache() -> None:
+    """Clear the in-process SAM/FastSAM model cache, releasing the associated memory."""
+    _MODEL_CACHE.clear()
+
 
 def hbb2obb(
     img_path: Path,
@@ -25,8 +52,10 @@ def hbb2obb(
     show_segments: bool = True,
     show_obb: bool = True,
     show_labels: bool = True,
+    show_confidence: bool = False,
     model_kwargs: Dict[str, Any] = None,
-) -> np.ndarray:
+    return_confidence: bool = False,
+) -> Union[np.ndarray, Tuple[np.ndarray, List[float]]]:
     """
     Convert HBB to OBB annotations using multiple SAM models and aggregating the masks by majority vote.
 
@@ -46,10 +75,13 @@ def hbb2obb(
         show_segments: Show segmentation contours
         show_obb: Show oriented bounding boxes
         show_labels: Show class labels
+        show_confidence: Print the per-OBB confidence score in the visualization
         model_kwargs: Additional keyword arguments for the SAM model
+        return_confidence: If True, also return the per-OBB confidence scores
 
-
-   as a numpy array     OBB annotations as a numpy array
+    Returns:
+        OBB annotations as a numpy array, or a (OBB annotations, confidences) tuple
+        when return_confidence is True
     """
     hbb_dir = get_hbb_dir(img_path, hbb_dir)
 
@@ -70,11 +102,7 @@ def hbb2obb(
 
     # Run each model and collect results
     for model_name in sam_models:
-        model_path = Path('models') / (model_name if model_name.endswith(".pt") else f"{model_name}.pt")
-        if "FastSAM" in model_name:
-            model = FastSAM(model_path)
-        else:
-            model = SAM(model_path)
+        model = load_sam_model(model_name)
 
         # Run inference with the model
         results = model(
@@ -95,7 +123,7 @@ def hbb2obb(
             print(f"Warning: Model {model_name} produced no masks for {img_path.name}")
 
     # Convert segmentation masks within HBBs to OBB annotations
-    obb_annotations, aggregated_masks, contours = create_obb_annotations_multi_model(
+    obb_annotations, aggregated_masks, contours, confidences = create_obb_annotations_multi_model(
         bbox_prompts, masks_all_models, opening_kernel_percentage
     )
 
@@ -114,18 +142,28 @@ def hbb2obb(
             show_segments=show_segments,
             show_obb=show_obb,
             show_labels=show_labels,
+            confidences=confidences,
+            show_confidence=show_confidence,
         )
 
+    if return_confidence:
+        return obb_annotations, confidences
     return obb_annotations
 
 
 def create_obb_annotations_multi_model(
     hbb_boxes: np.ndarray, masks_all_models: List[np.ndarray], opening_kernel_percentage: float
-) -> Tuple[np.ndarray, List[np.ndarray], List[np.ndarray]]:
+) -> Tuple[np.ndarray, List[np.ndarray], List[np.ndarray], List[float]]:
     """
-    Convert segmentation masks from multiple SAM models inside the HBBs to OBB an
-    using majority voting for mask aggregation and return aggregated masks and contoursnotations
-    using majority voting for mask aggregation and return aggregated masks and contours.
+    Convert segmentation masks from multiple SAM models inside the HBBs to OBB annotations
+    using majority voting for mask aggregation, and return the aggregated masks, contours,
+    and a per-OBB confidence score.
+
+    The confidence is a heuristic quality score in [0, 1]: fallback boxes (where no usable
+    mask/contour was found and the original HBB is emitted) score 0.0, while genuine OBBs
+    score ``rectangularity * consensus`` where ``rectangularity`` measures how tightly the
+    fitted rotated box wraps the segmented mask and ``consensus`` measures agreement across
+    the SAM model ensemble (1.0 for a single model).
 
     Args:
         hbb_boxes: HBB annotations as numpy array
@@ -137,10 +175,12 @@ def create_obb_annotations_multi_model(
         - List of OBB annotations
         - List of aggregated and HBB-cropped masks
         - List of contours
+        - List of per-OBB confidence scores in [0, 1]
     """
     obb_annotations = []
     aggregated_masks = []
     contours = []
+    confidences = []
 
     for hbb_box in hbb_boxes:
         label, xmin, ymin, xmax, ymax = hbb_box
@@ -168,12 +208,13 @@ def create_obb_annotations_multi_model(
             if best_model_mask is not None and max_overlap > 0:
                 best_hbb_masks.append(best_model_mask)
 
-        # If no valid masks were found, use the HBB as OBB
+        # If no valid masks were found, use the HBB as OBB (fallback -> zero confidence)
         if not best_hbb_masks:
             box_points = [x_min, y_min, x_max, y_min, x_max, y_max, x_min, y_max]
             obb_annotations.append([int(label), *box_points])
             aggregated_masks.append(None)
             contours.append(None)
+            confidences.append(0.0)
             continue
 
         # Aggregate masks using majority voting
@@ -207,11 +248,12 @@ def create_obb_annotations_multi_model(
         # Filter valid contours based on shape heuristics
         valid_hbb_contours = [c for c in hbb_contours if is_valid_contour(c, hbb_area=(xmax - xmin) * (ymax - ymin))]
 
-        # Fall back to original HBB if no valid contours found
+        # Fall back to original HBB if no valid contours found (fallback -> zero confidence)
         if not valid_hbb_contours:
             box_points = [x_min, y_min, x_max, y_min, x_max, y_max, x_min, y_max]
             obb_annotations.append([int(label), *box_points])
             contours.append(None)
+            confidences.append(0.0)
             continue
 
         # Choose largest valid contour
@@ -223,7 +265,17 @@ def create_obb_annotations_multi_model(
         box_points = cv2.boxPoints(rect).flatten().astype(np.int32)
         obb_annotations.append([int(label), *box_points])
 
-    return (np.array(obb_annotations) if obb_annotations else np.array([]), aggregated_masks, contours)
+        # Confidence = rectangularity (fit of the rotated box to the mask) * ensemble consensus.
+        # Rectangularity: contour area over the min-area rotated rect area, clipped to [0, 1].
+        rect_area = rect[1][0] * rect[1][1]
+        rectangularity = min(cv2.contourArea(largest_hbb_contour) / rect_area, 1.0) if rect_area > 0 else 0.0
+        # Consensus: fraction of the per-model union that survived the majority vote (1.0 for one model).
+        union_mask = np.logical_or.reduce(best_hbb_masks)
+        union_sum = union_mask.sum()
+        consensus = aggregated_hbb_mask.sum() / union_sum if union_sum > 0 else 0.0
+        confidences.append(float(rectangularity * consensus))
+
+    return (np.array(obb_annotations) if obb_annotations else np.array([]), aggregated_masks, contours, confidences)
 
 
 def scale_bounding_boxes(
@@ -351,9 +403,14 @@ def visualize_obb_annotations(
     show_segments: bool = True,
     show_obb: bool = True,
     show_labels: bool = True,
+    confidences: List[float] = None,
+    show_confidence: bool = False,
 ):
     """
     Visualize HBB, OBB, and segmentation masks on the image based on visualization flags.
+
+    When confidences are provided, OBB polygons are colored on a green->red gradient by
+    score (fallback boxes score 0.0 and appear red); otherwise the default cyan is used.
     """
     # Draw HBBs if enabled
     if show_hbb:
@@ -375,20 +432,33 @@ def visualize_obb_annotations(
             if segment is not None:
                 cv2.drawContours(img, [segment], 0, (0, 0, 255), 2)
 
-    # Draw OBBs and labels if enabled
-    if show_obb or show_labels:
-        for obb in obb_annotations:
+    # Draw OBBs, class labels, and/or confidence scores if enabled
+    if show_obb or show_labels or show_confidence:
+        for i, obb in enumerate(obb_annotations):
             label, x1, y1, x2, y2, x3, y3, x4, y4 = obb
+
+            # Color OBBs by confidence (green=high -> red=low/fallback) when scores are available,
+            # otherwise use the default cyan.
+            if confidences is not None and i < len(confidences):
+                c = max(0.0, min(1.0, confidences[i]))
+                obb_color = (0, int(255 * c), int(255 * (1 - c)))
+            else:
+                obb_color = (0, 255, 255)
 
             # Draw OBB polygons
             if show_obb:
-                cv2.polylines(
-                    img, [np.array([[x1, y1], [x2, y2], [x3, y3], [x4, y4]], np.int32)], True, (0, 255, 255), 3
-                )
+                cv2.polylines(img, [np.array([[x1, y1], [x2, y2], [x3, y3], [x4, y4]], np.int32)], True, obb_color, 3)
 
-            # Draw class labels
+            # Compose the text overlay from the class label and/or the confidence score. The two are
+            # independent: show_labels controls only the class id, show_confidence only the score.
+            text_parts = []
             if show_labels:
-                text = str(int(label))
+                text_parts.append(str(int(label)))
+            if show_confidence and confidences is not None and i < len(confidences):
+                text_parts.append(f"{confidences[i]:.2f}")
+
+            if text_parts:
+                text = " ".join(text_parts)
                 text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
 
                 # Ensure text is inside the image
@@ -400,7 +470,7 @@ def visualize_obb_annotations(
                     img,
                     (text_x - 2, text_y - text_size[1] - 2),
                     (text_x + text_size[0] + 2, text_y + 2),
-                    (0, 255, 255),
+                    obb_color,
                     -1,
                 )
                 cv2.putText(img, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
@@ -413,9 +483,12 @@ def visualize_obb_annotations(
     print(f"Saved image with OBB annotations: {viz_dir / img_path.name}")
 
 
-def save_obb_annotations(obb_annotations: np.ndarray, obb_dir: Path, img_path: Path):
+def save_obb_annotations(obb_annotations: np.ndarray, obb_dir: Path, img_path: Path, confidences: List[float] = None):
     """
     Save OBB annotations to a text file.
+
+    Each line is ``class x1 y1 x2 y2 x3 y3 x4 y4``. When ``confidences`` is provided, a 10th
+    field with the per-OBB confidence score is appended (``... x4 y4 conf``).
     """
     if obb_dir is None:
         obb_dir = img_path.parent.parent / "labels_obb"
@@ -423,9 +496,12 @@ def save_obb_annotations(obb_annotations: np.ndarray, obb_dir: Path, img_path: P
     save_filepath = obb_dir / (img_path.stem + ".txt")
 
     with open(save_filepath, "w", encoding="utf-8") as f:
-        for obb in obb_annotations:
+        for i, obb in enumerate(obb_annotations):
             label, x1, y1, x2, y2, x3, y3, x4, y4 = map(int, obb)
-            f.write(f"{label} {x1} {y1} {x2} {y2} {x3} {y3} {x4} {y4}\n")
+            line = f"{label} {x1} {y1} {x2} {y2} {x3} {y3} {x4} {y4}"
+            if confidences is not None:
+                line += f" {confidences[i]:.4f}"
+            f.write(line + "\n")
 
 
 def apply_morphological_opening(mask: np.ndarray, kernel_percentage: float) -> np.ndarray:

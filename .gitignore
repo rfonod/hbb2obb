@@ -92,3 +92,6 @@ venv.bak/
 # Pytorch weights
 *.pth
 *.pt
+
+# Native asset files
+assets/hbb2obb_illustration
