@@ -9,12 +9,7 @@ Command-line interface for HBB2OBB.
 import argparse
 from pathlib import Path
 
-import tqdm
-
 from hbb2obb import __version__
-from hbb2obb.converter import hbb2obb, save_obb_annotations
-from hbb2obb.evaluator import evaluate_obb, print_results
-from hbb2obb.utils import get_image_paths, process_ultralytics_kwargs
 
 SUPPORTED_SAM_MODELS = [
     "sam_b",
@@ -125,6 +120,12 @@ def main_hbb2obb():
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
 
     args = parser.parse_args()
+
+    import tqdm
+
+    from hbb2obb.converter import hbb2obb, save_obb_annotations
+    from hbb2obb.utils import get_image_paths, process_ultralytics_kwargs
+
     model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
 
     image_paths = get_image_paths(args.img_source)
@@ -208,6 +209,8 @@ def main_hbb2obb_eval():
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
 
     args = parser.parse_args()
+
+    from hbb2obb.evaluator import evaluate_obb, print_results
 
     results = evaluate_obb(
         gt_dir=args.gt_dir,
