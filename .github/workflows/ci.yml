@@ -41,7 +41,19 @@ jobs:
           cache: pip
       - name: Install system dependencies (Linux, for OpenCV)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+        run: |
+          for repo_file in \
+            /etc/apt/sources.list.d/microsoft-prod.list \
+            /etc/apt/sources.list.d/azure-cli.list \
+            /etc/apt/sources.list.d/packages-microsoft-prod.list \
+            /etc/apt/sources.list.d/microsoft-prod.sources \
+            /etc/apt/sources.list.d/azure-cli.sources; do
+            if [ -f "$repo_file" ]; then
+              sudo rm -f "$repo_file"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
       - name: Install package with dev extras
         run: |
           python -m pip install --upgrade pip
