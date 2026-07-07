@@ -168,7 +168,7 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--scale_factors` / `-sf`: factor(s) to scale HBBs (single value, or two values for short/long sides).
 - `--opening_kernel_percentage` / `-okp`: morphological opening kernel size as a percentage of the mask's smaller dimension.
 - `--save_confidence`: append a per-OBB [confidence score](#confidence-scores) as a 10th column in the output TXT files.
-- `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_labels`: visualization controls.
+- `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
 - `--model_kwargs` / `-k`: extra Ultralytics inference kwargs as `key1=value1,key2=value2`.
 
 Key evaluation arguments:
@@ -365,7 +365,7 @@ The score is the product of two factors:
 - **Rectangularity**: the fitted contour area divided by the area of its minimum-area rotated rectangle, i.e. how tightly the OBB wraps the segmented shape (`1.0` for a perfectly rectangular object).
 - **Ensemble consensus**: the fraction of the per-model mask union that survived the majority vote, i.e. how strongly the SAM models agree. This is `1.0` for a single model and equals the mask IoU for two models.
 
-Enable it with `--save_confidence` (writes a 10th column to each output file). In the visualization, OBBs are always tinted on a green→red gradient by score, and `--show_confidence` prints the numeric value next to each label. When using the Python API, pass `return_confidence=True` to `hbb2obb()` to get the scores back alongside the OBBs.
+Enable it with `--save_confidence` (writes a 10th column to each output file). In the visualization, OBBs are always tinted on a green→red gradient by score, and `--show_confidence` prints the numeric value next to each box. When using the Python API, pass `return_confidence=True` to `hbb2obb()` to get the scores back alongside the OBBs.
 
 ## Best Practices
 

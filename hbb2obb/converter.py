@@ -432,8 +432,8 @@ def visualize_obb_annotations(
             if segment is not None:
                 cv2.drawContours(img, [segment], 0, (0, 0, 255), 2)
 
-    # Draw OBBs and labels if enabled
-    if show_obb or show_labels:
+    # Draw OBBs, class labels, and/or confidence scores if enabled
+    if show_obb or show_labels or show_confidence:
         for i, obb in enumerate(obb_annotations):
             label, x1, y1, x2, y2, x3, y3, x4, y4 = obb
 
@@ -449,11 +449,16 @@ def visualize_obb_annotations(
             if show_obb:
                 cv2.polylines(img, [np.array([[x1, y1], [x2, y2], [x3, y3], [x4, y4]], np.int32)], True, obb_color, 3)
 
-            # Draw class labels
+            # Compose the text overlay from the class label and/or the confidence score. The two are
+            # independent: show_labels controls only the class id, show_confidence only the score.
+            text_parts = []
             if show_labels:
-                text = str(int(label))
-                if show_confidence and confidences is not None and i < len(confidences):
-                    text += f" {confidences[i]:.2f}"
+                text_parts.append(str(int(label)))
+            if show_confidence and confidences is not None and i < len(confidences):
+                text_parts.append(f"{confidences[i]:.2f}")
+
+            if text_parts:
+                text = " ".join(text_parts)
                 text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
 
                 # Ensure text is inside the image

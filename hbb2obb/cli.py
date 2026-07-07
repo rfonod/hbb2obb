@@ -93,13 +93,26 @@ def main_hbb2obb():
         "--show_obb", action="store_true", default=True, help="Show oriented bounding boxes (default: True)"
     )
     viz_group.add_argument("--hide_obb", action="store_false", dest="show_obb", help="Hide oriented bounding boxes")
-    viz_group.add_argument("--show_labels", action="store_true", default=True, help="Show class labels (default: True)")
-    viz_group.add_argument("--hide_labels", action="store_false", dest="show_labels", help="Hide class labels")
+    viz_group.add_argument(
+        "--show_class_labels",
+        "--show_labels",
+        action="store_true",
+        default=True,
+        dest="show_labels",
+        help="Show class labels (default: True). '--show_labels' is a deprecated alias.",
+    )
+    viz_group.add_argument(
+        "--hide_class_labels",
+        "--hide_labels",
+        action="store_false",
+        dest="show_labels",
+        help="Hide class labels; does not affect --show_confidence. '--hide_labels' is a deprecated alias.",
+    )
     viz_group.add_argument(
         "--show_confidence",
         action="store_true",
         default=False,
-        help="Print the confidence score next to each OBB label (default: False)",
+        help="Show the per-OBB confidence score in the visualization, independently of class labels (default: False)",
     )
     viz_group.add_argument(
         "--hide_confidence", action="store_false", dest="show_confidence", help="Hide the confidence score value"
