@@ -358,11 +358,9 @@ Key characteristics:
 
 ## Confidence Scores
 
-Each OBB carries a heuristic quality score in `[0, 1]` that helps triage a converted dataset: high scores are trustworthy SAM fits, low scores warrant a look, and `0.0` marks a fallback where the original HBB was kept. It is a heuristic, not a calibrated probability.
+Each OBB carries a heuristic quality score in `[0, 1]` that helps triage a converted dataset: high scores are trustworthy SAM fits, low scores warrant a look, and `0.0` marks a fallback where the original HBB was kept. It is a heuristic, not a calibrated probability. The detail crop below shows the score that `--show_confidence` prints next to each converted box.
 
 ![Confidence-scored OBBs](https://raw.githubusercontent.com/rfonod/hbb2obb/main/assets/hbb2obb_confidence_scores.jpg)
-
-Detail crop of a converted image: each OBB is tinted on a green→red gradient by its confidence score, which `--show_confidence` prints next to the box.
 
 The score is the product of two factors:
 
