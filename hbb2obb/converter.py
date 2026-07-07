@@ -10,6 +10,33 @@ from ultralytics import SAM, FastSAM
 
 from hbb2obb.utils import Annotations, get_hbb_dir
 
+# Cache of loaded SAM/FastSAM model instances, keyed by the resolved weights path, so that
+# repeated hbb2obb() calls (e.g. one per image in a directory) reuse an already-loaded model
+# instead of reconstructing it from disk on every call.
+_MODEL_CACHE: Dict[str, Any] = {}
+
+
+def load_sam_model(model_name: str):
+    """
+    Load a SAM/FastSAM model by name, reusing a cached instance when one is already loaded.
+
+    Args:
+        model_name: Model name (e.g. "sam_b", "sam2.1_b", "FastSAM-s"), with or without a ".pt" suffix.
+
+    Returns:
+        The loaded ultralytics SAM or FastSAM model instance.
+    """
+    model_path = Path('models') / (model_name if model_name.endswith(".pt") else f"{model_name}.pt")
+    cache_key = str(model_path)
+    if cache_key not in _MODEL_CACHE:
+        _MODEL_CACHE[cache_key] = FastSAM(model_path) if "FastSAM" in model_name else SAM(model_path)
+    return _MODEL_CACHE[cache_key]
+
+
+def clear_model_cache() -> None:
+    """Clear the in-process SAM/FastSAM model cache, releasing the associated memory."""
+    _MODEL_CACHE.clear()
+
 
 def hbb2obb(
     img_path: Path,
@@ -70,11 +97,7 @@ def hbb2obb(
 
     # Run each model and collect results
     for model_name in sam_models:
-        model_path = Path('models') / (model_name if model_name.endswith(".pt") else f"{model_name}.pt")
-        if "FastSAM" in model_name:
-            model = FastSAM(model_path)
-        else:
-            model = SAM(model_path)
+        model = load_sam_model(model_name)
 
         # Run inference with the model
         results = model(
