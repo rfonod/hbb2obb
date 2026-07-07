@@ -1,8 +1,19 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
-from hbb2obb.converter import aggregate_masks_by_majority_vote, create_obb_annotations_multi_model, scale_bounding_boxes
+import hbb2obb.converter as converter
+from hbb2obb.converter import (
+    aggregate_masks_by_majority_vote,
+    clear_model_cache,
+    create_obb_annotations_multi_model,
+    load_sam_model,
+    save_obb_annotations,
+    scale_bounding_boxes,
+)
+from hbb2obb.evaluator import parse_obb_file
 
 
 class MockAnnotations:
@@ -38,7 +49,9 @@ class TestConverter(unittest.TestCase):
 
         all_models_masks = [[mask]]
 
-        result, masks, contours = create_obb_annotations_multi_model(self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0)
+        result, masks, contours, confidences = create_obb_annotations_multi_model(
+            self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0
+        )
 
         self.assertEqual(len(result), 1, "Should return 1 OBB annotation")
         self.assertEqual(result[0][0], 0, "Label should be preserved")
@@ -62,7 +75,9 @@ class TestConverter(unittest.TestCase):
 
         all_models_masks = [[mask]]
 
-        result, masks, contours = create_obb_annotations_multi_model(self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0)
+        result, masks, contours, confidences = create_obb_annotations_multi_model(
+            self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0
+        )
 
         self.assertEqual(len(result), 1, "Should return 1 OBB annotation")
 
@@ -94,7 +109,9 @@ class TestConverter(unittest.TestCase):
 
         all_models_masks = [[mask1], [mask2]]
 
-        result, masks, contours = create_obb_annotations_multi_model(self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0)
+        result, masks, contours, confidences = create_obb_annotations_multi_model(
+            self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0
+        )
 
         self.assertEqual(len(result), 1, "Should return 1 OBB annotation")
         self.assertEqual(result[0][0], 0, "Label should be preserved")
@@ -105,7 +122,9 @@ class TestConverter(unittest.TestCase):
         mask = np.zeros((self.img_height, self.img_width), dtype=bool)
         all_models_masks = [[mask]]
 
-        result, masks, contours = create_obb_annotations_multi_model(self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0)
+        result, masks, contours, confidences = create_obb_annotations_multi_model(
+            self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0
+        )
 
         self.assertEqual(len(result), 1, "Should return 1 OBB annotation")
         self.assertEqual(result[0][0], 0, "Label should be preserved")
@@ -136,7 +155,9 @@ class TestConverter(unittest.TestCase):
 
         all_models_masks = [[mask]]
 
-        result, masks, contours = create_obb_annotations_multi_model(self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0)
+        result, masks, contours, confidences = create_obb_annotations_multi_model(
+            self.hbb_boxes[0:1], all_models_masks, opening_kernel_percentage=0.0
+        )
 
         self.assertEqual(len(result), 1, "Should return 1 OBB annotation")
         self.assertEqual(result[0][0], 0, "Label should be preserved")
@@ -256,6 +277,140 @@ class TestConverter(unittest.TestCase):
         # Check that we don't exceed image dimensions
         self.assertLessEqual(result[0, 3], self.img_width - 1)
         self.assertLessEqual(result[0, 4], self.img_height - 1)
+
+
+class TestModelCache(unittest.TestCase):
+    """Tests for the SAM/FastSAM model cache (load-once behavior)."""
+
+    def setUp(self):
+        # Count constructor calls and stub out the real ultralytics models
+        self.sam_calls = []
+        self.fastsam_calls = []
+
+        def fake_sam(path):
+            self.sam_calls.append(str(path))
+            return ("SAM", str(path))
+
+        def fake_fastsam(path):
+            self.fastsam_calls.append(str(path))
+            return ("FastSAM", str(path))
+
+        self._orig_sam = converter.SAM
+        self._orig_fastsam = converter.FastSAM
+        converter.SAM = fake_sam
+        converter.FastSAM = fake_fastsam
+        clear_model_cache()
+
+    def tearDown(self):
+        converter.SAM = self._orig_sam
+        converter.FastSAM = self._orig_fastsam
+        clear_model_cache()
+
+    def test_model_loaded_once_and_reused(self):
+        first = load_sam_model("sam_b")
+        second = load_sam_model("sam_b")
+        # Same instance returned, constructor called only once
+        self.assertIs(first, second)
+        self.assertEqual(len(self.sam_calls), 1)
+
+    def test_name_and_pt_suffix_share_cache_entry(self):
+        load_sam_model("sam_b")
+        load_sam_model("sam_b.pt")  # resolves to the same weights path
+        self.assertEqual(len(self.sam_calls), 1)
+
+    def test_fastsam_routed_to_fastsam_loader(self):
+        load_sam_model("FastSAM-s")
+        self.assertEqual(len(self.fastsam_calls), 1)
+        self.assertEqual(len(self.sam_calls), 0)
+
+    def test_clear_model_cache_forces_reload(self):
+        load_sam_model("sam_b")
+        clear_model_cache()
+        load_sam_model("sam_b")
+        self.assertEqual(len(self.sam_calls), 2)
+
+
+class TestConfidence(unittest.TestCase):
+    """Tests for the per-OBB confidence score."""
+
+    def setUp(self):
+        self.img_width = 640
+        self.img_height = 480
+        # Single HBB covering the region the test masks live in
+        self.hbb_boxes = np.array([[0, 100, 100, 300, 200]])
+
+    def test_rectangular_mask_high_confidence(self):
+        """A well-aligned rectangular mask fills its min-area rect -> confidence ~1.0."""
+        mask = np.zeros((self.img_height, self.img_width), dtype=bool)
+        mask[120:180, 120:280] = True
+        _, _, _, confidences = create_obb_annotations_multi_model(
+            [self.hbb_boxes[0]], [[mask]], opening_kernel_percentage=0.0
+        )
+
+        self.assertEqual(len(confidences), 1)
+        self.assertGreater(confidences[0], 0.95, "Rectangular mask should score near 1.0")
+        self.assertLessEqual(confidences[0], 1.0)
+
+    def test_fallback_zero_confidence(self):
+        """No usable mask -> HBB fallback with confidence 0.0."""
+        mask = np.zeros((self.img_height, self.img_width), dtype=bool)
+        _, _, _, confidences = create_obb_annotations_multi_model(
+            [self.hbb_boxes[0]], [[mask]], opening_kernel_percentage=0.0
+        )
+
+        self.assertEqual(confidences, [0.0])
+
+    def test_disagreeing_models_lower_consensus(self):
+        """Two disagreeing masks yield lower confidence than two identical masks."""
+        mask_a = np.zeros((self.img_height, self.img_width), dtype=bool)
+        mask_a[120:180, 120:280] = True
+        mask_b = np.zeros((self.img_height, self.img_width), dtype=bool)
+        mask_b[130:170, 150:250] = True  # overlaps but differs from mask_a
+
+        _, _, _, conf_agree = create_obb_annotations_multi_model(
+            [self.hbb_boxes[0]], [[mask_a], [mask_a]], opening_kernel_percentage=0.0
+        )
+        _, _, _, conf_disagree = create_obb_annotations_multi_model(
+            [self.hbb_boxes[0]], [[mask_a], [mask_b]], opening_kernel_percentage=0.0
+        )
+
+        self.assertLess(conf_disagree[0], conf_agree[0], "Disagreeing models should lower confidence")
+
+    def test_all_confidences_within_unit_range(self):
+        """Confidence scores are always within [0, 1]."""
+        mask = np.zeros((self.img_height, self.img_width), dtype=bool)
+        mask[120:180, 120:280] = True
+        empty = np.zeros((self.img_height, self.img_width), dtype=bool)
+        boxes = np.array([[0, 100, 100, 300, 200], [1, 400, 300, 500, 400]])
+        _, _, _, confidences = create_obb_annotations_multi_model(boxes, [[mask, empty]], opening_kernel_percentage=0.0)
+
+        self.assertEqual(len(confidences), 2)
+        for c in confidences:
+            self.assertGreaterEqual(c, 0.0)
+            self.assertLessEqual(c, 1.0)
+
+
+class TestSaveConfidenceRoundTrip(unittest.TestCase):
+    """save_obb_annotations with confidences -> parse_obb_file still reads the boxes."""
+
+    def test_confidence_column_written_and_parsed(self):
+        obb_annotations = np.array([[0, 100, 100, 300, 100, 300, 200, 100, 200]])
+        confidences = [0.7321]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            obb_dir = Path(tmp)
+            img_path = obb_dir / "sample.jpg"
+            save_obb_annotations(obb_annotations, obb_dir, img_path, confidences=confidences)
+
+            saved = obb_dir / "sample.txt"
+            parts = saved.read_text().strip().split()
+            self.assertEqual(len(parts), 10, "Line should have label + 8 coords + confidence")
+            self.assertAlmostEqual(float(parts[9]), 0.7321, places=4)
+
+            # The evaluator's parser tolerates (and ignores) the 10th column
+            boxes = parse_obb_file(saved)
+            self.assertEqual(len(boxes), 1, "Parser must not skip the 10-field line")
+            self.assertEqual(boxes[0]["label"], 0)
 
 
 if __name__ == "__main__":

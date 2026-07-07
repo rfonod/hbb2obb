@@ -268,11 +268,11 @@ def parse_obb_file(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         for line in f.readlines():
             parts = line.strip().split()
-            if len(parts) != 9:  # label + 8 coordinates
+            if len(parts) < 9:  # label + 8 coordinates (a trailing confidence column is ignored)
                 continue
 
             label = int(parts[0])
-            coordinates = list(map(float, parts[1:]))
+            coordinates = list(map(float, parts[1:9]))
 
             # Create polygon from coordinates
             points = [
