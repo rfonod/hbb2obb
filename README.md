@@ -11,7 +11,7 @@
 - 🎯 **Accurate OBBs from HBBs**: prompts SAM-family segmentation models with your existing horizontal boxes to fit tight oriented boxes around non-upright objects, with no re-annotation required.
 - 🧩 **Model ensemble**: combines masks from multiple SAM variants through majority voting for more robust, accurate results (see [Usage](#usage)).
 - 🛡️ **Spatially constrained & safe**: region-specific masking and contour refinement keep segmentation inside the object, and a fallback keeps the original HBB when no valid mask is found.
-- 🔎 **Confidence-scored output**: every OBB gets a quality score in `[0, 1]` that flags silent fallbacks and low-confidence conversions, so you know which boxes to trust (see [Confidence scores](#confidence-scores)).
+- 🔎 **Confidence-scored output**: every OBB gets a quality score in `[0, 1]` that flags silent fallbacks and low-confidence conversions, so you know which boxes to trust; your detector's own confidence can be carried through instead of, or on top of, that score (see [Confidence scores](#confidence-scores)).
 - 📐 **Flexible scaling**: positive or negative scale factors (optionally different for the short and long sides) recover cropped object parts or tighten overly conservative annotations.
 - 📊 **Evaluate & optimize**: built-in IoU evaluation against ground truth plus a hyperparameter optimizer over SAM inference resolution × scale factors.
 - 🔄 **Format conversions**: utilities to move between YOLO TXT and COCO / Pascal VOC / LabelMe JSON annotations.
@@ -24,7 +24,7 @@
 - **Segmentation-based**: uses state-of-the-art SAM models for accurate object boundary detection.
 - **Multiple model support**: SAM, SAM2, SAM2.1, SAM3, Mobile SAM, and FastSAM families ([details](https://docs.ultralytics.com/models/sam/)).
 - **Model ensemble**: combine multiple models via majority voting for enhanced accuracy.
-- **Confidence scoring**: a per-OBB quality score flags fallbacks and low-confidence conversions for triage ([details](#confidence-scores)).
+- **Confidence scoring**: a per-OBB quality score flags fallbacks and low-confidence conversions for triage, optionally combined with the detector confidence from the input ([details](#confidence-scores)).
 - **Evaluation tools**: assess OBB accuracy against ground truth using IoU metrics.
 - **Hyperparameter optimization**: search SAM inference resolutions and HBB scale factors for the best settings on your data.
 - **Visualization tools**: render HBBs, segmentation masks, derived contours, and resulting OBBs.
@@ -68,6 +68,8 @@ Also works with [uv](https://docs.astral.sh/uv/) (`uv pip install hbb2obb`) and 
 
 > [!NOTE]
 > SAM model weights are downloaded automatically by [Ultralytics](https://docs.ultralytics.com/models/sam/) on first use into a `models/` directory relative to your **current working directory**: run commands from a consistent location so weights are reused. The one exception is SAM 3, which must be downloaded manually (see below).
+
+Both commands check PyPI once a day, in the background, for a newer HBB2OBB release and print a one-line notice if one exists. The check never blocks, never fails a run, and is silent when offline. Set `HBB2OBB_DISABLE_UPDATE_CHECK=1` to turn it off.
 
 <details>
 <summary><b>Alternatives: conda or uv</b></summary>
@@ -308,6 +310,14 @@ python scripts/plot_optimization_results.py /path/to/optimization_results
 class_id x_center y_center width height
 ```
 
+An optional 6th column holding the detector confidence is accepted and can be carried into the output (see [Confidence scores](#confidence-scores)), which is the shape most detectors write:
+
+```text
+class_id x_center y_center width height confidence
+```
+
+Blank lines are skipped, and an empty label file (a frame with no objects) is valid input: it simply produces an empty output file, so a whole directory converts without interruption.
+
 You bring your own HBB annotations. If you don't have any and your objects are vehicles (car, bus, truck, motorcycle), you can generate them from drone imagery with [Geo-trax](https://github.com/rfonod/geo-trax) and feed its detections straight into HBB2OBB.
 
 **OBB annotations (output)**: YOLO TXT, one file per image; four corners in absolute px:
@@ -368,6 +378,16 @@ The score is the product of two factors:
 - **Ensemble consensus**: the fraction of the per-model mask union that survived the majority vote, i.e. how strongly the SAM models agree. This is `1.0` for a single model and equals the mask IoU for two models.
 
 Enable it with `--save_confidence` (writes a 10th column to each output file). In the visualization, OBBs are always tinted on a green→red gradient by score, and `--show_confidence` prints the numeric value next to each box. When using the Python API, pass `return_confidence=True` to `hbb2obb()` to get the scores back alongside the OBBs.
+
+**Choosing which score is reported.** If your HBB files carry a detector confidence in a 6th column, `--confidence_source` (or the `confidence_source` argument of `hbb2obb()`) selects what the reported score means:
+
+| Value | Reported score |
+| :--- | :--- |
+| `conversion` (default) | the heuristic conversion quality described above |
+| `detector` | the detector confidence read from the HBB input |
+| `combined` | the product of the two |
+
+The two measure different things: `conversion` says how well the OBB fits the segmented shape, `detector` says how sure the detector was that there is an object there at all. Boxes whose input line carried no confidence column fall back to the conversion score, so no output is ever left without one.
 
 ## Best Practices
 
