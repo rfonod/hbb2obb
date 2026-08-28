@@ -10,6 +10,7 @@ import argparse
 from pathlib import Path
 
 from hbb2obb import __version__
+from hbb2obb.version_check import check_for_updates_once
 
 SUPPORTED_SAM_MODELS = [
     "sam_b",
@@ -146,6 +147,8 @@ def main_hbb2obb():
 
     args = parser.parse_args()
 
+    check_for_updates_once()
+
     import tqdm
 
     from hbb2obb.converter import hbb2obb, save_obb_annotations
@@ -235,6 +238,8 @@ def main_hbb2obb_eval():
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
 
     args = parser.parse_args()
+
+    check_for_updates_once()
 
     from hbb2obb.evaluator import evaluate_obb, print_results
 
