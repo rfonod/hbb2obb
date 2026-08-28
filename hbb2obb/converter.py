@@ -55,6 +55,7 @@ def hbb2obb(
     show_confidence: bool = False,
     model_kwargs: Dict[str, Any] = None,
     return_confidence: bool = False,
+    confidence_source: str = "conversion",
 ) -> Union[np.ndarray, Tuple[np.ndarray, List[float]]]:
     """
     Convert HBB to OBB annotations using multiple SAM models and aggregating the masks by majority vote.
@@ -78,6 +79,9 @@ def hbb2obb(
         show_confidence: Print the per-OBB confidence score in the visualization
         model_kwargs: Additional keyword arguments for the SAM model
         return_confidence: If True, also return the per-OBB confidence scores
+        confidence_source: Which score the returned confidences carry: 'conversion' (the
+                     heuristic conversion-quality score), 'detector' (the confidence read
+                     from the HBB input file), or 'combined' (their product)
 
     Returns:
         OBB annotations as a numpy array, or a (OBB annotations, confidences) tuple
@@ -91,6 +95,10 @@ def hbb2obb(
     # Load HBB annotations and scale them
     annotations = Annotations(hbb_dir / (img_path.stem + ".txt"), img)
     bbox_prompts = scale_bounding_boxes(annotations, scale_factors)
+
+    # Nothing to convert: SAM cannot be prompted with zero boxes
+    if len(bbox_prompts) == 0:
+        return (np.array([]), []) if return_confidence else np.array([])
 
     # Convert single model to list for consistent processing
     if isinstance(sam_models, str):
@@ -127,6 +135,9 @@ def hbb2obb(
         bbox_prompts, masks_all_models, opening_kernel_percentage
     )
 
+    # Blend in the detector confidence from the HBB file when requested
+    confidences = resolve_confidences(confidences, annotations.hbb_scores, confidence_source, img_path)
+
     # Save visualization images if enabled
     if save_img:
         visualize_obb_annotations(
@@ -149,6 +160,55 @@ def hbb2obb(
     if return_confidence:
         return obb_annotations, confidences
     return obb_annotations
+
+
+def resolve_confidences(
+    conversion_scores: List[float],
+    detector_scores: np.ndarray,
+    confidence_source: str = "conversion",
+    img_path: Path = None,
+) -> List[float]:
+    """
+    Pick the per-OBB confidence score to report, given both available sources.
+
+    Args:
+        conversion_scores: Heuristic conversion-quality scores from create_obb_annotations_multi_model()
+        detector_scores: Per-HBB detector confidences parsed from the input file; nan where the
+                         input line carried no confidence column
+        confidence_source: 'conversion' (default), 'detector', or 'combined' (the product of both)
+        img_path: Image being processed, used only to name the file in the fallback warning
+
+    Returns:
+        List of confidence scores in [0, 1], one per OBB. Where a detector score was requested
+        but is missing (nan), the conversion score is used instead and a single warning is printed.
+    """
+    if confidence_source == "conversion":
+        return conversion_scores
+
+    if confidence_source not in ("detector", "combined"):
+        raise ValueError(f"Unsupported confidence_source: {confidence_source}")
+
+    resolved = []
+    missing = 0
+    for i, conversion in enumerate(conversion_scores):
+        detector = float(detector_scores[i]) if i < len(detector_scores) else float("nan")
+        if np.isnan(detector):
+            # No confidence column on that input line: fall back to the conversion score
+            missing += 1
+            resolved.append(conversion)
+        elif confidence_source == "detector":
+            resolved.append(detector)
+        else:
+            resolved.append(detector * conversion)
+
+    if missing:
+        name = img_path.name if img_path is not None else "input"
+        print(
+            f"Warning: {missing}/{len(conversion_scores)} HBBs for {name} carry no confidence column; "
+            f"using the conversion score for those boxes."
+        )
+
+    return resolved
 
 
 def create_obb_annotations_multi_model(

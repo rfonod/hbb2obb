@@ -10,6 +10,7 @@ from hbb2obb.converter import (
     clear_model_cache,
     create_obb_annotations_multi_model,
     load_sam_model,
+    resolve_confidences,
     save_obb_annotations,
     scale_bounding_boxes,
 )
@@ -415,3 +416,51 @@ class TestSaveConfidenceRoundTrip(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestResolveConfidences(unittest.TestCase):
+    """Tests for picking which confidence score gets reported."""
+
+    def setUp(self):
+        self.conversion = [0.9, 0.5]
+        self.detector = np.array([0.8, 0.4])
+
+    def test_conversion_source_is_unchanged(self):
+        """The default leaves the heuristic conversion scores untouched."""
+        result = resolve_confidences(self.conversion, self.detector, "conversion")
+        self.assertEqual(result, self.conversion)
+
+    def test_detector_source(self):
+        """'detector' reports the score parsed from the HBB input file."""
+        result = resolve_confidences(self.conversion, self.detector, "detector")
+        np.testing.assert_allclose(result, [0.8, 0.4])
+
+    def test_combined_source(self):
+        """'combined' multiplies the detector and conversion scores."""
+        result = resolve_confidences(self.conversion, self.detector, "combined")
+        np.testing.assert_allclose(result, [0.72, 0.2])
+
+    def test_missing_detector_score_falls_back(self):
+        """A nan detector score (no confidence column) falls back to the conversion score."""
+        detector = np.array([0.8, float("nan")])
+
+        np.testing.assert_allclose(resolve_confidences(self.conversion, detector, "detector"), [0.8, 0.5])
+        np.testing.assert_allclose(resolve_confidences(self.conversion, detector, "combined"), [0.72, 0.5])
+
+    def test_no_detector_scores_at_all(self):
+        """With no scores available, every box falls back and nothing is nan."""
+        detector = np.array([float("nan"), float("nan")])
+        result = resolve_confidences(self.conversion, detector, "detector")
+
+        np.testing.assert_allclose(result, self.conversion)
+        self.assertFalse(np.isnan(result).any())
+
+    def test_empty_input(self):
+        """Empty input yields an empty result for every source."""
+        for source in ("conversion", "detector", "combined"):
+            self.assertEqual(list(resolve_confidences([], np.empty((0,)), source)), [])
+
+    def test_unsupported_source_raises(self):
+        """An unknown confidence source is rejected rather than silently ignored."""
+        with self.assertRaises(ValueError):
+            resolve_confidences(self.conversion, self.detector, "detector_only")

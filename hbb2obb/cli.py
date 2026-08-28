@@ -125,6 +125,18 @@ def main_hbb2obb():
         help="Append a per-OBB confidence score as a 10th column in the output TXT files",
     )
     parser.add_argument(
+        "--confidence_source",
+        "-cs",
+        type=str,
+        default="conversion",
+        choices=["conversion", "detector", "combined"],
+        help=(
+            "Which score the reported confidence carries: 'conversion' (heuristic conversion quality, "
+            "default), 'detector' (the confidence column of the HBB input), or 'combined' (their product). "
+            "Only affects output when --save_confidence or --show_confidence is used."
+        ),
+    )
+    parser.add_argument(
         "--model_kwargs",
         "-k",
         type=str,
@@ -160,6 +172,7 @@ def main_hbb2obb():
             show_confidence=args.show_confidence,
             model_kwargs=model_kwargs,
             return_confidence=args.save_confidence,
+            confidence_source=args.confidence_source,
         )
 
         # Unpack confidences when requested, then save OBB annotations to a text file
