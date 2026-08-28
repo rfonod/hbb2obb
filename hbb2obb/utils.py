@@ -32,24 +32,33 @@ class Annotations:
 
     def load_hbb_annotations(self) -> np.ndarray:
         """
-        Load HBB annotations from a text file
+        Load HBB annotations from a text file, with an optional trailing confidence column
         """
         if not self.hbb_filepath.exists():
             print(f"Annotation file not found: {self.hbb_filepath}")
             sys.exit(1)
         with open(self.hbb_filepath, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+            lines = [line.strip().split() for line in f]
 
-        hbb_xyxy = []
-        first_line = lines[0].strip().split()
-        xc, yc = map(float, first_line[1:3])
+        # Drop blank lines
+        lines = [line_parts for line_parts in lines if line_parts]
+
+        # An empty label file is valid input, e.g. a frame with no objects
+        if not lines:
+            self.normalized = False
+            self.hbb_scores = np.empty((0,))
+            return np.empty((0, 5))
+
+        # Decide on normalization from the first non-blank line
+        xc, yc = map(float, lines[0][1:3])
         self.normalized = 0 <= xc <= 1 and 0 <= yc <= 1
 
-        for line in lines:
-            line_parts = line.strip().split()
+        hbb_xyxy = []
+        hbb_scores = []
+        for line_parts in lines:
             label = int(line_parts[0])
             if self.input_format == "xywh":
-                xc, yc, w, h = map(float, line_parts[1:])
+                xc, yc, w, h = map(float, line_parts[1:5])
                 if self.normalized:
                     xc *= self.img_shape[0]
                     yc *= self.img_shape[1]
@@ -60,7 +69,7 @@ class Annotations:
                 x2 = xc + w / 2
                 y2 = yc + h / 2
             elif self.input_format == "xyxy":
-                x1, y1, x2, y2 = map(float, line_parts[1:])
+                x1, y1, x2, y2 = map(float, line_parts[1:5])
                 if self.normalized:
                     x1 *= self.img_shape[0]
                     y1 *= self.img_shape[1]
@@ -70,12 +79,20 @@ class Annotations:
                 raise ValueError(f"Unsupported format: {self.input_format}")
             hbb_xyxy.append([label, x1, y1, x2, y2])
 
+            # Optional detector confidence; nan when the line carries none
+            hbb_scores.append(float(line_parts[5]) if len(line_parts) > 5 else float("nan"))
+
+        self.hbb_scores = np.array(hbb_scores)
+
         return np.array(hbb_xyxy)
 
     def convert_to_xywh(self) -> np.ndarray:
         """
         Convert HBB xyxy to xywh format
         """
+        if len(self.hbb_xyxy) == 0:
+            return np.empty((0, 5))
+
         hbb_xywh = []
         for box in self.hbb_xyxy:
             label, x1, y1, x2, y2 = box

@@ -2,9 +2,11 @@ import os
 import tempfile
 from pathlib import Path
 
+import numpy as np
+import pytest
 import yaml
 
-from hbb2obb.utils import get_image_paths, load_label_map, process_ultralytics_kwargs
+from hbb2obb.utils import Annotations, get_image_paths, load_label_map, process_ultralytics_kwargs
 
 
 class TestUtils:
@@ -131,3 +133,91 @@ class TestUtils:
         # Test with invalid input
         result = process_ultralytics_kwargs("conf=0.25,iou")
         assert result == {}
+
+
+@pytest.fixture
+def img():
+    """A small blank image (200 px wide, 100 px tall) to size the annotations against."""
+    return np.zeros((100, 200, 3), np.uint8)
+
+
+def _annotations(tmp_path, content, img, input_format="xywh"):
+    """Write a label file and parse it."""
+    label_file = tmp_path / "frame.txt"
+    label_file.write_text(content, encoding="utf-8")
+    return Annotations(label_file, img, input_format=input_format)
+
+
+class TestAnnotations:
+    def test_absolute_xywh(self, tmp_path, img):
+        """Absolute-pixel xywh lines are parsed without rescaling."""
+        ann = _annotations(tmp_path, "0 100 50 40 20\n", img)
+
+        assert ann.normalized is False
+        np.testing.assert_allclose(ann.hbb_xyxy, [[0, 80, 40, 120, 60]])
+        np.testing.assert_allclose(ann.hbb_xywh, [[0, 100, 50, 40, 20]])
+        assert np.isnan(ann.hbb_scores).all()
+
+    def test_normalized_xywh(self, tmp_path, img):
+        """Relative coordinates are scaled by the image dimensions."""
+        ann = _annotations(tmp_path, "1 0.5 0.5 0.2 0.2\n", img)
+
+        assert ann.normalized is True
+        np.testing.assert_allclose(ann.hbb_xyxy, [[1, 80, 40, 120, 60]])
+
+    def test_absolute_xyxy(self, tmp_path, img):
+        """The xyxy input format is parsed as corner coordinates."""
+        ann = _annotations(tmp_path, "2 80 40 120 60\n", img, input_format="xyxy")
+
+        np.testing.assert_allclose(ann.hbb_xyxy, [[2, 80, 40, 120, 60]])
+
+    def test_confidence_column_xywh(self, tmp_path, img):
+        """A 6th confidence column (what detectors write) is parsed, not rejected."""
+        ann = _annotations(tmp_path, "0 100 50 40 20 0.87\n1 20 20 10 10 0.42\n", img)
+
+        np.testing.assert_allclose(ann.hbb_xyxy[0], [0, 80, 40, 120, 60])
+        np.testing.assert_allclose(ann.hbb_scores, [0.87, 0.42])
+
+    def test_confidence_column_xyxy(self, tmp_path, img):
+        """The same holds for the xyxy input format."""
+        ann = _annotations(tmp_path, "0 80 40 120 60 0.87\n", img, input_format="xyxy")
+
+        np.testing.assert_allclose(ann.hbb_xyxy, [[0, 80, 40, 120, 60]])
+        np.testing.assert_allclose(ann.hbb_scores, [0.87])
+
+    def test_ragged_confidence_columns(self, tmp_path, img):
+        """Mixed 5- and 6-field lines parse, with nan marking the missing scores."""
+        ann = _annotations(tmp_path, "0 100 50 40 20 0.87\n1 20 20 10 10\n", img)
+
+        assert len(ann.hbb_xyxy) == 2
+        assert ann.hbb_scores[0] == pytest.approx(0.87)
+        assert np.isnan(ann.hbb_scores[1])
+
+    def test_empty_file(self, tmp_path, img):
+        """An empty label file (a frame with no objects) yields empty arrays, not an IndexError."""
+        ann = _annotations(tmp_path, "", img)
+
+        assert ann.hbb_xyxy.shape == (0, 5)
+        assert ann.hbb_xywh.shape == (0, 5)
+        assert ann.hbb_scores.shape == (0,)
+        assert ann.normalized is False
+
+    def test_blank_only_file(self, tmp_path, img):
+        """A file holding nothing but blank lines is treated as empty."""
+        ann = _annotations(tmp_path, "\n\n   \n", img)
+
+        assert ann.hbb_xyxy.shape == (0, 5)
+        assert ann.hbb_xywh.shape == (0, 5)
+
+    def test_leading_blank_line(self, tmp_path, img):
+        """Normalization is decided from the first non-blank line, and blanks are skipped."""
+        ann = _annotations(tmp_path, "\n0 100 50 40 20\n\n1 20 20 10 10\n", img)
+
+        assert ann.normalized is False
+        assert len(ann.hbb_xyxy) == 2
+        np.testing.assert_allclose(ann.hbb_xyxy[0], [0, 80, 40, 120, 60])
+
+    def test_unsupported_format_raises(self, tmp_path, img):
+        """An unknown input format is still rejected."""
+        with pytest.raises(ValueError, match="Unsupported format"):
+            _annotations(tmp_path, "0 100 50 40 20\n", img, input_format="cxcywha")

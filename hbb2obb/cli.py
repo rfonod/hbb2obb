@@ -10,6 +10,7 @@ import argparse
 from pathlib import Path
 
 from hbb2obb import __version__
+from hbb2obb.version_check import check_for_updates_once
 
 SUPPORTED_SAM_MODELS = [
     "sam_b",
@@ -42,6 +43,12 @@ def main_hbb2obb():
     )
     parser.add_argument(
         "--obb_dir", "-od", type=Path, help="Directory to save OBB annotations (default: img_source/../labels_obb)"
+    )
+    parser.add_argument(
+        "--polygon_dir",
+        "-pd",
+        type=Path,
+        help="Directory to save polygon annotations (default: img_source/../labels_polygon)",
     )
     parser.add_argument(
         "--sam_models",
@@ -125,6 +132,30 @@ def main_hbb2obb():
         help="Append a per-OBB confidence score as a 10th column in the output TXT files",
     )
     parser.add_argument(
+        "--confidence_source",
+        "-cs",
+        type=str,
+        default="conversion",
+        choices=["conversion", "detector", "combined"],
+        help=(
+            "Which score the reported confidence carries: 'conversion' (heuristic conversion quality, "
+            "default), 'detector' (the confidence column of the HBB input), or 'combined' (their product). "
+            "Only affects output when --save_confidence or --show_confidence is used."
+        ),
+    )
+    parser.add_argument(
+        "--save_polygon",
+        action="store_true",
+        help="Also save the segmentation polygon of each object, a tighter alternative to its OBB",
+    )
+    parser.add_argument(
+        "--polygon_epsilon",
+        "-pe",
+        type=float,
+        default=0.0,
+        help="Simplify saved polygons with an epsilon of this fraction of the contour perimeter (0 to disable)",
+    )
+    parser.add_argument(
         "--model_kwargs",
         "-k",
         type=str,
@@ -134,9 +165,11 @@ def main_hbb2obb():
 
     args = parser.parse_args()
 
+    check_for_updates_once()
+
     import tqdm
 
-    from hbb2obb.converter import hbb2obb, save_obb_annotations
+    from hbb2obb.converter import hbb2obb, save_obb_annotations, save_polygon_annotations
     from hbb2obb.utils import get_image_paths, process_ultralytics_kwargs
 
     model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
@@ -160,14 +193,21 @@ def main_hbb2obb():
             show_confidence=args.show_confidence,
             model_kwargs=model_kwargs,
             return_confidence=args.save_confidence,
+            confidence_source=args.confidence_source,
+            return_contours=args.save_polygon,
         )
 
-        # Unpack confidences when requested, then save OBB annotations to a text file
-        if args.save_confidence:
-            obb_annotations, confidences = result
-        else:
-            obb_annotations, confidences = result, None
+        # Unpack the extras hbb2obb() appends for the flags that were requested
+        values = list(result) if isinstance(result, tuple) else [result]
+        obb_annotations = values.pop(0)
+        confidences = values.pop(0) if args.save_confidence else None
+        contours = values.pop(0) if args.save_polygon else None
+
         save_obb_annotations(obb_annotations, args.obb_dir, img_path, confidences=confidences)
+        if args.save_polygon:
+            save_polygon_annotations(
+                contours, obb_annotations, args.polygon_dir, img_path, confidences, args.polygon_epsilon
+            )
 
 
 def main_hbb2obb_eval():
@@ -222,6 +262,8 @@ def main_hbb2obb_eval():
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
 
     args = parser.parse_args()
+
+    check_for_updates_once()
 
     from hbb2obb.evaluator import evaluate_obb, print_results
 

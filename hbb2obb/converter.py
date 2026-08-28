@@ -55,7 +55,9 @@ def hbb2obb(
     show_confidence: bool = False,
     model_kwargs: Dict[str, Any] = None,
     return_confidence: bool = False,
-) -> Union[np.ndarray, Tuple[np.ndarray, List[float]]]:
+    confidence_source: str = "conversion",
+    return_contours: bool = False,
+) -> Union[np.ndarray, Tuple]:
     """
     Convert HBB to OBB annotations using multiple SAM models and aggregating the masks by majority vote.
 
@@ -78,10 +80,21 @@ def hbb2obb(
         show_confidence: Print the per-OBB confidence score in the visualization
         model_kwargs: Additional keyword arguments for the SAM model
         return_confidence: If True, also return the per-OBB confidence scores
+        confidence_source: Which score the returned confidences carry: 'conversion' (the
+                     heuristic conversion-quality score), 'detector' (the confidence read
+                     from the HBB input file), or 'combined' (their product)
+        return_contours: If True, also return the per-object segmentation contours, in absolute
+                     image pixel coordinates, with None where the OBB is a fallback HBB
 
     Returns:
-        OBB annotations as a numpy array, or a (OBB annotations, confidences) tuple
-        when return_confidence is True
+        OBB annotations as a numpy array, with the requested extras appended in a tuple:
+
+        - neither flag: obb_annotations
+        - return_confidence: (obb_annotations, confidences)
+        - return_contours: (obb_annotations, contours)
+        - both flags: (obb_annotations, confidences, contours)
+
+        The confidences and contours lists are always the same length as obb_annotations.
     """
     hbb_dir = get_hbb_dir(img_path, hbb_dir)
 
@@ -91,6 +104,10 @@ def hbb2obb(
     # Load HBB annotations and scale them
     annotations = Annotations(hbb_dir / (img_path.stem + ".txt"), img)
     bbox_prompts = scale_bounding_boxes(annotations, scale_factors)
+
+    # Nothing to convert: SAM cannot be prompted with zero boxes
+    if len(bbox_prompts) == 0:
+        return pack_results(np.array([]), [], [], return_confidence, return_contours)
 
     # Convert single model to list for consistent processing
     if isinstance(sam_models, str):
@@ -127,6 +144,9 @@ def hbb2obb(
         bbox_prompts, masks_all_models, opening_kernel_percentage
     )
 
+    # Blend in the detector confidence from the HBB file when requested
+    confidences = resolve_confidences(confidences, annotations.hbb_scores, confidence_source, img_path)
+
     # Save visualization images if enabled
     if save_img:
         visualize_obb_annotations(
@@ -146,9 +166,78 @@ def hbb2obb(
             show_confidence=show_confidence,
         )
 
+    return pack_results(obb_annotations, confidences, contours, return_confidence, return_contours)
+
+
+def pack_results(
+    obb_annotations: np.ndarray,
+    confidences: List[float],
+    contours: List[np.ndarray],
+    return_confidence: bool,
+    return_contours: bool,
+) -> Union[np.ndarray, Tuple]:
+    """
+    Append the optionally requested extras to the OBB annotations, in a fixed order.
+    """
+    if not return_confidence and not return_contours:
+        return obb_annotations
+
+    extras = []
     if return_confidence:
-        return obb_annotations, confidences
-    return obb_annotations
+        extras.append(confidences)
+    if return_contours:
+        extras.append(contours)
+
+    return (obb_annotations, *extras)
+
+
+def resolve_confidences(
+    conversion_scores: List[float],
+    detector_scores: np.ndarray,
+    confidence_source: str = "conversion",
+    img_path: Path = None,
+) -> List[float]:
+    """
+    Pick the per-OBB confidence score to report, given both available sources.
+
+    Args:
+        conversion_scores: Heuristic conversion-quality scores from create_obb_annotations_multi_model()
+        detector_scores: Per-HBB detector confidences parsed from the input file; nan where the
+                         input line carried no confidence column
+        confidence_source: 'conversion' (default), 'detector', or 'combined' (the product of both)
+        img_path: Image being processed, used only to name the file in the fallback warning
+
+    Returns:
+        List of confidence scores in [0, 1], one per OBB. Where a detector score was requested
+        but is missing (nan), the conversion score is used instead and a single warning is printed.
+    """
+    if confidence_source == "conversion":
+        return conversion_scores
+
+    if confidence_source not in ("detector", "combined"):
+        raise ValueError(f"Unsupported confidence_source: {confidence_source}")
+
+    resolved = []
+    missing = 0
+    for i, conversion in enumerate(conversion_scores):
+        detector = float(detector_scores[i]) if i < len(detector_scores) else float("nan")
+        if np.isnan(detector):
+            # No confidence column on that input line: fall back to the conversion score
+            missing += 1
+            resolved.append(conversion)
+        elif confidence_source == "detector":
+            resolved.append(detector)
+        else:
+            resolved.append(detector * conversion)
+
+    if missing:
+        name = img_path.name if img_path is not None else "input"
+        print(
+            f"Warning: {missing}/{len(conversion_scores)} HBBs for {name} carry no confidence column; "
+            f"using the conversion score for those boxes."
+        )
+
+    return resolved
 
 
 def create_obb_annotations_multi_model(
@@ -502,6 +591,83 @@ def save_obb_annotations(obb_annotations: np.ndarray, obb_dir: Path, img_path: P
             if confidences is not None:
                 line += f" {confidences[i]:.4f}"
             f.write(line + "\n")
+
+
+def save_polygon_annotations(
+    contours: List[np.ndarray],
+    obb_annotations: np.ndarray,
+    polygon_dir: Path,
+    img_path: Path,
+    confidences: List[float] = None,
+    simplify_epsilon: float = 0.0,
+) -> None:
+    """
+    Save the segmentation polygons to a text file, as a tighter alternative to the OBBs.
+
+    Each line is ``class x1 y1 x2 y2 ... xN yN``, the corners in absolute pixel coordinates,
+    the same convention ``save_obb_annotations`` uses. When ``confidences`` is provided, the
+    per-object score is appended as a final field, exactly as the OBB writer does.
+
+    Row alignment is guaranteed: the file holds exactly one line per OBB, in the same order,
+    so line i here and line i of the OBB file for the same image describe the same object.
+    Objects that fell back to the HBB (no usable mask, contour ``None``) are written as the
+    four corners of their OBB row rather than skipped, which makes a fallback recognizable
+    as a four-point polygon identical to its OBB line.
+
+    Args:
+        contours: Per-object contours from hbb2obb(..., return_contours=True), None for fallbacks
+        obb_annotations: Matching OBB annotations, supplying the class label and the fallback corners
+        polygon_dir: Directory to save the polygon annotations
+        img_path: Image the annotations belong to, used to derive the output file name
+        confidences: Per-object confidence scores, written as a trailing field
+        simplify_epsilon: If > 0, simplify each contour with cv2.approxPolyDP using an epsilon of
+                     this fraction of the contour perimeter (cv2.arcLength), so one value behaves
+                     consistently across object sizes; 0.005 to 0.02 are typical. The default 0
+                     writes the raw contour. Fallback rectangles are never simplified.
+    """
+    if contours is None or len(contours) != len(obb_annotations):
+        raise ValueError(
+            f"Expected one contour per OBB, got {len(contours) if contours is not None else None} "
+            f"contours for {len(obb_annotations)} OBBs"
+        )
+
+    if polygon_dir is None:
+        polygon_dir = img_path.parent.parent / "labels_polygon"
+    polygon_dir.mkdir(exist_ok=True, parents=True)
+    save_filepath = polygon_dir / (img_path.stem + ".txt")
+
+    with open(save_filepath, "w", encoding="utf-8") as f:
+        for i, obb in enumerate(obb_annotations):
+            if contours[i] is None:
+                # Fallback: reuse the OBB corners so both files stay in agreement
+                points = np.array(obb[1:], dtype=np.int32).reshape(-1, 2)
+            else:
+                points = simplify_contour(contours[i], simplify_epsilon)
+            line = f"{int(obb[0])} " + " ".join(f"{int(x)} {int(y)}" for x, y in points)
+            if confidences is not None:
+                line += f" {confidences[i]:.4f}"
+            f.write(line + "\n")
+
+
+def simplify_contour(contour: np.ndarray, epsilon: float) -> np.ndarray:
+    """
+    Reduce a contour to fewer vertices using the Douglas-Peucker algorithm.
+
+    Args:
+        contour: Contour as returned by cv2.findContours
+        epsilon: Approximation accuracy as a fraction of the contour perimeter (cv2.arcLength),
+                 not an absolute pixel distance. Values <= 0 leave the contour untouched.
+
+    Returns:
+        The contour points as an (N, 2) array, left unsimplified if the simplification would
+        leave fewer than three points.
+    """
+    points = contour.reshape(-1, 2)
+    if epsilon <= 0:
+        return points
+
+    simplified = cv2.approxPolyDP(contour, epsilon * cv2.arcLength(contour, True), True).reshape(-1, 2)
+    return simplified if len(simplified) >= 3 else points
 
 
 def apply_morphological_opening(mask: np.ndarray, kernel_percentage: float) -> np.ndarray:

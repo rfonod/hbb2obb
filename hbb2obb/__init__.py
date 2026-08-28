@@ -5,5 +5,6 @@ __all__ = [
     "cli",
     "converter",
     "evaluator",
-    "utils"
+    "utils",
+    "version_check",
 ]

@@ -26,16 +26,23 @@ build-backend = "setuptools.build_meta"
 name = "hbb2obb"
 dynamic = ["version"]
 description = "Toolkit for converting horizontal bounding boxes to oriented bounding boxes using segmentation models and evaluation of the conversion against ground truth."
+# Split into name-only and email-only entries so both Author and Author-email are populated
 authors = [
-    { name = "Robert Fonod", email = "robert.fonod@ieee.org" },
+    { name = "Robert Fonod" },
+    { email = "robert.fonod@ieee.org" },
+]
+maintainers = [
+    { name = "Robert Fonod" },
+    { email = "robert.fonod@ieee.org" },
 ]
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+# Table form (not the SPDX string) so PyPI populates info.license; setuptools drops it 2027-Feb-18
+license = { text = "MIT" }
 requires-python = ">=3.9"
 keywords = ["bounding-box", "oriented-bounding-box", "rotated-bounding-box", "horizontal-bounding-box", "axis-aligned-bounding-box", "object detection", "segmentation", "evaluation", "computer-vision", "aerial-imagery", "drone-footage", "remote-sensing", "annotation-tools", "label-conversion", "YOLO-format", "COCO-format", "evaluation-metrics", "iou-evaluation", "hyperparameter-optimization"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
