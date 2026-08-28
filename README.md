@@ -25,6 +25,7 @@
 - **Multiple model support**: SAM, SAM2, SAM2.1, SAM3, Mobile SAM, and FastSAM families ([details](https://docs.ultralytics.com/models/sam/)).
 - **Model ensemble**: combine multiple models via majority voting for enhanced accuracy.
 - **Confidence scoring**: a per-OBB quality score flags fallbacks and low-confidence conversions for triage, optionally combined with the detector confidence from the input ([details](#confidence-scores)).
+- **Polygon output**: optionally save the segmentation contour behind each OBB, row-aligned with the OBB file, as a tighter object outline for downstream masking ([details](#data-format)).
 - **Evaluation tools**: assess OBB accuracy against ground truth using IoU metrics.
 - **Hyperparameter optimization**: search SAM inference resolutions and HBB scale factors for the best settings on your data.
 - **Visualization tools**: render HBBs, segmentation masks, derived contours, and resulting OBBs.
@@ -150,6 +151,9 @@ hbb2obb /path/to/images --scale_factors 0.1 0.05 # short side / long side
 
 # Save visualization images of the conversion
 hbb2obb /path/to/images --save_img
+
+# Also save the segmentation polygon of each object, a tighter outline than its OBB
+hbb2obb /path/to/images --save_polygon --polygon_dir /path/to/save/polygons
 ```
 
 ### Evaluating OBB Predictions
@@ -190,7 +194,7 @@ Key evaluation arguments:
 
 ```python
 from pathlib import Path
-from hbb2obb.converter import hbb2obb, save_obb_annotations
+from hbb2obb.converter import hbb2obb, save_obb_annotations, save_polygon_annotations
 
 img_path = Path("/path/to/images/img1.jpg")
 
@@ -220,6 +224,10 @@ save_obb_annotations(obb_annotations, "/path/to/save/obb/annotations", img_path)
 # Also return per-OBB confidence scores, and write them as a 10th column
 obb_annotations, confidences = hbb2obb(img_path=img_path, sam_models="sam_b", return_confidence=True)
 save_obb_annotations(obb_annotations, "/path/to/save/obb/annotations", img_path, confidences=confidences)
+
+# Also return the segmentation contours, and write them as polygon annotations
+obb_annotations, contours = hbb2obb(img_path=img_path, sam_models="sam_b", return_contours=True)
+save_polygon_annotations(contours, obb_annotations, "/path/to/save/polygons", img_path)
 ```
 
 **Evaluating OBB predictions:**
@@ -334,6 +342,20 @@ class_id x1 y1 x2 y2 x3 y3 x4 y4 confidence
 
 `hbb2obb-eval` ignores the trailing confidence column, so evaluation works on either variant.
 
+**Polygon annotations (optional output)**: with `--save_polygon`, the segmentation contour each OBB was fitted to is written to a parallel directory (`labels_polygon` by default), one file per image; a variable number of corners in absolute px:
+
+```text
+class_id x1 y1 x2 y2 ... xN yN
+```
+
+With `--save_confidence`, a trailing column holds the same per-object score written to the OBB file:
+
+```text
+class_id x1 y1 x2 y2 ... xN yN confidence
+```
+
+The polygon is a tighter outline of the object than its OBB, which makes it useful as a mask for downstream work. It is row-aligned with the OBB file: line *i* of both files describes the same object, so the two can be joined by line number. Objects that fell back to the HBB are written as a four-point rectangle identical to their OBB line rather than skipped, which is what keeps that alignment exact. `--polygon_epsilon` simplifies the polygons, the value being a fraction of the contour perimeter (`0.01` typically drops about 90% of the vertices); the default `0` writes the raw contour.
+
 **Label map (optional)**: YAML mapping class IDs to names:
 
 ```yaml
@@ -353,7 +375,7 @@ HBB2OBB fits each OBB by prompting SAM with your HBBs, refining the resulting ma
 2. **Scale bounding boxes**: positive factors expand HBBs (recover cropped parts), negative factors shrink them (tighten conservative boxes); short and long sides can be scaled differently.
 3. **Segmentation**: run SAM model(s) with the HBBs as prompts.
 4. **Mask aggregation**: with an ensemble, combine masks by majority voting; clip to the scaled HBB region; apply morphological opening.
-5. **Contour extraction**: extract the largest refined mask contour per object.
+5. **Contour extraction**: extract the largest refined mask contour per object (optionally saved with `--save_polygon`).
 6. **OBB computation**: fit a minimum-area oriented bounding box.
 7. **Fallback**: if no valid mask is found inside an HBB, keep the original HBB as the OBB (confidence `0.0`).
 8. **Confidence**: score each OBB in `[0, 1]` (see [Confidence Scores](#confidence-scores)).

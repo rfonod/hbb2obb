@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 import hbb2obb.converter as converter
@@ -12,6 +13,7 @@ from hbb2obb.converter import (
     load_sam_model,
     resolve_confidences,
     save_obb_annotations,
+    save_polygon_annotations,
     scale_bounding_boxes,
 )
 from hbb2obb.evaluator import parse_obb_file
@@ -414,10 +416,6 @@ class TestSaveConfidenceRoundTrip(unittest.TestCase):
             self.assertEqual(boxes[0]["label"], 0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestResolveConfidences(unittest.TestCase):
     """Tests for picking which confidence score gets reported."""
 
@@ -464,3 +462,116 @@ class TestResolveConfidences(unittest.TestCase):
         """An unknown confidence source is rejected rather than silently ignored."""
         with self.assertRaises(ValueError):
             resolve_confidences(self.conversion, self.detector, "detector_only")
+
+
+class TestSavePolygonAnnotations(unittest.TestCase):
+    """Tests for writing the segmentation polygons alongside the OBBs."""
+
+    def setUp(self):
+        img_height, img_width = 480, 640
+        self.hbb_boxes = np.array(
+            [
+                [0, 100, 100, 300, 200],  # [label, x1, y1, x2, y2]
+                [1, 400, 300, 500, 400],
+            ]
+        )
+
+        # A rotated ellipse inside the first HBB only, so the second object falls back to its HBB
+        mask = np.zeros((img_height, img_width), dtype=np.uint8)
+        cv2.ellipse(mask, (200, 150), (80, 40), 20, 0, 360, 1, -1)
+
+        self.obb_annotations, _, self.contours, self.confidences = create_obb_annotations_multi_model(
+            self.hbb_boxes, [[mask.astype(bool)]], opening_kernel_percentage=0.0
+        )
+
+    def write_both(self, tmp, confidences=None, simplify_epsilon=0.0):
+        """Write the OBB and polygon files for a fake image and return their lines."""
+        img_path = Path(tmp) / "images" / "sample.jpg"
+        obb_dir = Path(tmp) / "labels_obb"
+        polygon_dir = Path(tmp) / "labels_polygon"
+
+        save_obb_annotations(self.obb_annotations, obb_dir, img_path, confidences=confidences)
+        save_polygon_annotations(
+            self.contours, self.obb_annotations, polygon_dir, img_path, confidences, simplify_epsilon
+        )
+
+        return (
+            (obb_dir / "sample.txt").read_text().splitlines(),
+            (polygon_dir / "sample.txt").read_text().splitlines(),
+        )
+
+    def test_setup_has_one_contour_and_one_fallback(self):
+        """The fixture must exercise both the segmented and the fallback path"""
+        self.assertIsNotNone(self.contours[0], "First object should have a contour")
+        self.assertIsNone(self.contours[1], "Second object should be a fallback")
+
+    def test_fallback_writes_four_point_line(self):
+        """A fallback object is written as a four-point rectangle, not skipped"""
+        with tempfile.TemporaryDirectory() as tmp:
+            obb_lines, polygon_lines = self.write_both(tmp)
+
+        parts = polygon_lines[1].split()
+        self.assertEqual(len(parts), 9, "Fallback line should be a label plus four points")
+        self.assertEqual(parts[1:], obb_lines[1].split()[1:], "Fallback polygon should equal its OBB row")
+
+    def test_row_aligned_with_obb_file(self):
+        """The polygon file has one line per OBB, in the same order"""
+        with tempfile.TemporaryDirectory() as tmp:
+            obb_lines, polygon_lines = self.write_both(tmp)
+
+        self.assertEqual(len(polygon_lines), len(obb_lines), "Both files should have the same number of lines")
+        self.assertEqual(
+            [line.split()[0] for line in polygon_lines],
+            [line.split()[0] for line in obb_lines],
+            "Class labels should match line by line",
+        )
+
+    def test_segmented_object_written_as_polygon(self):
+        """A segmented object keeps its full contour, not just four corners"""
+        with tempfile.TemporaryDirectory() as tmp:
+            _, polygon_lines = self.write_both(tmp)
+
+        parts = polygon_lines[0].split()
+        self.assertGreater(len(parts), 9, "A segmented object should have more than four points")
+        self.assertEqual((len(parts) - 1) % 2, 0, "Coordinates should come in x y pairs")
+
+    def test_confidence_column_mirrors_obb_file(self):
+        """The trailing confidence field is identical in both files"""
+        with tempfile.TemporaryDirectory() as tmp:
+            obb_lines, polygon_lines = self.write_both(tmp, confidences=self.confidences)
+
+        for polygon_line, obb_line in zip(polygon_lines, obb_lines):
+            self.assertEqual(polygon_line.split()[-1], obb_line.split()[-1])
+        self.assertEqual(float(polygon_lines[1].split()[-1]), 0.0, "Fallback should keep confidence 0.0")
+
+    def test_simplification_reduces_vertices(self):
+        """A positive epsilon drops vertices but never below a triangle"""
+        with tempfile.TemporaryDirectory() as tmp:
+            _, raw_lines = self.write_both(tmp)
+        with tempfile.TemporaryDirectory() as tmp:
+            _, simplified_lines = self.write_both(tmp, simplify_epsilon=0.02)
+
+        raw_points = (len(raw_lines[0].split()) - 1) // 2
+        simplified_points = (len(simplified_lines[0].split()) - 1) // 2
+        self.assertLess(simplified_points, raw_points, "Simplification should drop vertices")
+        self.assertGreaterEqual(simplified_points, 3, "Simplification should never leave fewer than 3 points")
+        self.assertEqual(len(simplified_lines[1].split()), 9, "Fallback rectangles are never simplified")
+
+    def test_empty_annotations_write_empty_file(self):
+        """An image with no objects produces an empty polygon file"""
+        with tempfile.TemporaryDirectory() as tmp:
+            img_path = Path(tmp) / "images" / "sample.jpg"
+            polygon_dir = Path(tmp) / "labels_polygon"
+            save_polygon_annotations([], np.array([]), polygon_dir, img_path)
+
+            self.assertEqual((polygon_dir / "sample.txt").read_text(), "")
+
+    def test_contour_count_mismatch_raises(self):
+        """Row alignment is enforced, not assumed"""
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                save_polygon_annotations(self.contours[:1], self.obb_annotations, Path(tmp), Path(tmp) / "sample.jpg")
+
+
+if __name__ == "__main__":
+    unittest.main()

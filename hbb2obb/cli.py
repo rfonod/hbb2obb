@@ -45,6 +45,12 @@ def main_hbb2obb():
         "--obb_dir", "-od", type=Path, help="Directory to save OBB annotations (default: img_source/../labels_obb)"
     )
     parser.add_argument(
+        "--polygon_dir",
+        "-pd",
+        type=Path,
+        help="Directory to save polygon annotations (default: img_source/../labels_polygon)",
+    )
+    parser.add_argument(
         "--sam_models",
         "-sm",
         type=str,
@@ -138,6 +144,18 @@ def main_hbb2obb():
         ),
     )
     parser.add_argument(
+        "--save_polygon",
+        action="store_true",
+        help="Also save the segmentation polygon of each object, a tighter alternative to its OBB",
+    )
+    parser.add_argument(
+        "--polygon_epsilon",
+        "-pe",
+        type=float,
+        default=0.0,
+        help="Simplify saved polygons with an epsilon of this fraction of the contour perimeter (0 to disable)",
+    )
+    parser.add_argument(
         "--model_kwargs",
         "-k",
         type=str,
@@ -151,7 +169,7 @@ def main_hbb2obb():
 
     import tqdm
 
-    from hbb2obb.converter import hbb2obb, save_obb_annotations
+    from hbb2obb.converter import hbb2obb, save_obb_annotations, save_polygon_annotations
     from hbb2obb.utils import get_image_paths, process_ultralytics_kwargs
 
     model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
@@ -176,14 +194,20 @@ def main_hbb2obb():
             model_kwargs=model_kwargs,
             return_confidence=args.save_confidence,
             confidence_source=args.confidence_source,
+            return_contours=args.save_polygon,
         )
 
-        # Unpack confidences when requested, then save OBB annotations to a text file
-        if args.save_confidence:
-            obb_annotations, confidences = result
-        else:
-            obb_annotations, confidences = result, None
+        # Unpack the extras hbb2obb() appends for the flags that were requested
+        values = list(result) if isinstance(result, tuple) else [result]
+        obb_annotations = values.pop(0)
+        confidences = values.pop(0) if args.save_confidence else None
+        contours = values.pop(0) if args.save_polygon else None
+
         save_obb_annotations(obb_annotations, args.obb_dir, img_path, confidences=confidences)
+        if args.save_polygon:
+            save_polygon_annotations(
+                contours, obb_annotations, args.polygon_dir, img_path, confidences, args.polygon_epsilon
+            )
 
 
 def main_hbb2obb_eval():
