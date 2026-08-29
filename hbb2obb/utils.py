@@ -56,6 +56,15 @@ class Annotations:
         hbb_xyxy = []
         hbb_scores = []
         for line_parts in lines:
+            # class + 4 coords + an optional trailing confidence column; reject anything past that
+            # instead of silently discarding it (a former unconditional line_parts[1:] unpack would
+            # have raised on this).
+            if len(line_parts) > 6:
+                raise ValueError(
+                    f"Malformed HBB line in {self.hbb_filepath} (expected at most 6 fields, "
+                    f"got {len(line_parts)}): {' '.join(line_parts)}"
+                )
+
             label = int(line_parts[0])
             if self.input_format == "xywh":
                 xc, yc, w, h = map(float, line_parts[1:5])
