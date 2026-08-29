@@ -69,6 +69,21 @@ def test_opt_out_skips_network(cache_in_tmp, monkeypatch):
     assert called == []
 
 
+@pytest.mark.parametrize("falsy_value", ["0", "false", "False", "no", "off", ""])
+def test_opt_out_falsy_value_does_not_skip_network(cache_in_tmp, monkeypatch, falsy_value):
+    """A conventionally-false env var value (notably '0') must not opt out of the check."""
+    called = []
+
+    def _open(url, timeout=None):
+        called.append(url)
+        return _fake_urlopen('999.0.0')(url, timeout)
+
+    monkeypatch.setattr(vc.urllib.request, 'urlopen', _open)
+    monkeypatch.setenv(vc.ENV_OPT_OUT, falsy_value)
+    vc.check_for_updates(blocking=True)
+    assert called == [vc.PYPI_URL]
+
+
 def test_fresh_cache_skips_network(cache_in_tmp, monkeypatch, capsys):
     vc._write_cache('999.0.0')
     called = []
