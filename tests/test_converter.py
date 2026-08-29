@@ -11,10 +11,12 @@ from hbb2obb.converter import (
     clear_model_cache,
     create_obb_annotations_multi_model,
     load_sam_model,
+    pack_results,
     resolve_confidences,
     save_obb_annotations,
     save_polygon_annotations,
     scale_bounding_boxes,
+    unpack_results,
 )
 from hbb2obb.evaluator import parse_obb_file
 
@@ -416,6 +418,44 @@ class TestSaveConfidenceRoundTrip(unittest.TestCase):
             self.assertEqual(boxes[0]["label"], 0)
 
 
+class TestPackUnpackResults(unittest.TestCase):
+    """unpack_results() must invert pack_results() for every combination of the two flags,
+    exactly as the CLI relies on, without either side hard-coding the other's append order."""
+
+    def setUp(self):
+        self.obb_annotations = np.array([[0, 100, 100, 300, 100, 300, 200, 100, 200]])
+        self.confidences = [0.5]
+        self.contours = [np.array([[100, 100]])]
+
+    def _round_trip(self, return_confidence, return_contours):
+        packed = pack_results(self.obb_annotations, self.confidences, self.contours, return_confidence, return_contours)
+        return unpack_results(packed, return_confidence, return_contours)
+
+    def test_neither_flag(self):
+        obb, confidences, contours = self._round_trip(False, False)
+        np.testing.assert_array_equal(obb, self.obb_annotations)
+        self.assertIsNone(confidences)
+        self.assertIsNone(contours)
+
+    def test_confidence_only(self):
+        obb, confidences, contours = self._round_trip(True, False)
+        np.testing.assert_array_equal(obb, self.obb_annotations)
+        self.assertEqual(confidences, self.confidences)
+        self.assertIsNone(contours)
+
+    def test_contours_only(self):
+        obb, confidences, contours = self._round_trip(False, True)
+        np.testing.assert_array_equal(obb, self.obb_annotations)
+        self.assertIsNone(confidences)
+        self.assertEqual(contours, self.contours)
+
+    def test_both_flags(self):
+        obb, confidences, contours = self._round_trip(True, True)
+        np.testing.assert_array_equal(obb, self.obb_annotations)
+        self.assertEqual(confidences, self.confidences)
+        self.assertEqual(contours, self.contours)
+
+
 class TestResolveConfidences(unittest.TestCase):
     """Tests for picking which confidence score gets reported."""
 
@@ -462,6 +502,11 @@ class TestResolveConfidences(unittest.TestCase):
         """An unknown confidence source is rejected rather than silently ignored."""
         with self.assertRaises(ValueError):
             resolve_confidences(self.conversion, self.detector, "detector_only")
+
+    def test_length_mismatch_raises(self):
+        """A detector_scores/conversion_scores length mismatch is rejected, not silently masked."""
+        with self.assertRaises(ValueError):
+            resolve_confidences(self.conversion, np.array([0.8]), "detector")
 
 
 class TestSavePolygonAnnotations(unittest.TestCase):

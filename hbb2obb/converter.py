@@ -144,8 +144,12 @@ def hbb2obb(
         bbox_prompts, masks_all_models, opening_kernel_percentage
     )
 
-    # Blend in the detector confidence from the HBB file when requested
-    confidences = resolve_confidences(confidences, annotations.hbb_scores, confidence_source, img_path)
+    # Blend in the detector confidence from the HBB file, but only when a caller actually asked
+    # for it: --confidence_source is documented as a no-op unless --save_confidence or
+    # --show_confidence is used, and resolving it unconditionally would also print its "missing
+    # confidence column" warning for runs that never look at the confidence at all.
+    if return_confidence or show_confidence:
+        confidences = resolve_confidences(confidences, annotations.hbb_scores, confidence_source, img_path)
 
     # Save visualization images if enabled
     if save_img:
@@ -177,7 +181,9 @@ def pack_results(
     return_contours: bool,
 ) -> Union[np.ndarray, Tuple]:
     """
-    Append the optionally requested extras to the OBB annotations, in a fixed order.
+    Append the optionally requested extras to the OBB annotations, in a fixed order
+    (confidences before contours). Pair with `unpack_results()`, which mirrors this same
+    order, rather than reconstructing it by hand at the call site.
     """
     if not return_confidence and not return_contours:
         return obb_annotations
@@ -191,6 +197,22 @@ def pack_results(
     return (obb_annotations, *extras)
 
 
+def unpack_results(
+    result: Union[np.ndarray, Tuple], return_confidence: bool, return_contours: bool
+) -> Tuple[np.ndarray, Union[List[float], None], Union[List[np.ndarray], None]]:
+    """
+    Inverse of `pack_results()`: recover (obb_annotations, confidences, contours) from a
+    `hbb2obb()` return value, given the same `return_confidence`/`return_contours` flags that
+    were passed to produce it. `confidences`/`contours` are None for extras that were not
+    requested, rather than the caller having to know pack_results()'s append order.
+    """
+    values = list(result) if isinstance(result, tuple) else [result]
+    obb_annotations = values.pop(0)
+    confidences = values.pop(0) if return_confidence else None
+    contours = values.pop(0) if return_contours else None
+    return obb_annotations, confidences, contours
+
+
 def resolve_confidences(
     conversion_scores: List[float],
     detector_scores: np.ndarray,
@@ -202,10 +224,14 @@ def resolve_confidences(
 
     Args:
         conversion_scores: Heuristic conversion-quality scores from create_obb_annotations_multi_model()
-        detector_scores: Per-HBB detector confidences parsed from the input file; nan where the
-                         input line carried no confidence column
+        detector_scores: Per-HBB detector confidences parsed from the input file, same length as
+                         conversion_scores; nan where the input line carried no confidence column
         confidence_source: 'conversion' (default), 'detector', or 'combined' (the product of both)
         img_path: Image being processed, used only to name the file in the fallback warning
+
+    Raises:
+        ValueError: If confidence_source is unsupported, or if detector_scores and
+                    conversion_scores have different lengths (they must be 1:1, one per HBB)
 
     Returns:
         List of confidence scores in [0, 1], one per OBB. Where a detector score was requested
@@ -217,10 +243,16 @@ def resolve_confidences(
     if confidence_source not in ("detector", "combined"):
         raise ValueError(f"Unsupported confidence_source: {confidence_source}")
 
+    if len(detector_scores) != len(conversion_scores):
+        raise ValueError(
+            f"conversion_scores and detector_scores must be the same length (one per HBB), got "
+            f"{len(conversion_scores)} and {len(detector_scores)}"
+        )
+
     resolved = []
     missing = 0
     for i, conversion in enumerate(conversion_scores):
-        detector = float(detector_scores[i]) if i < len(detector_scores) else float("nan")
+        detector = float(detector_scores[i])
         if np.isnan(detector):
             # No confidence column on that input line: fall back to the conversion score
             missing += 1
@@ -564,12 +596,33 @@ def visualize_obb_annotations(
                 )
                 cv2.putText(img, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
-    if viz_dir is None:
-        viz_dir = img_path.parent.parent / "labels_obb"
-    viz_dir.mkdir(exist_ok=True, parents=True)
+    viz_dir = resolve_output_dir(viz_dir, img_path, "labels_obb")
 
     cv2.imwrite(str(viz_dir / img_path.name), img)
     print(f"Saved image with OBB annotations: {viz_dir / img_path.name}")
+
+
+def resolve_output_dir(output_dir: Path, img_path: Path, default_subdir: str) -> Path:
+    """
+    Resolve the directory a per-image annotation/visualization file should be saved to, creating
+    it if needed. Defaults to ``img_path.parent.parent / default_subdir`` when ``output_dir`` is
+    None, the convention shared by all of hbb2obb's output writers.
+    """
+    if output_dir is None:
+        output_dir = img_path.parent.parent / default_subdir
+    output_dir.mkdir(exist_ok=True, parents=True)
+    return output_dir
+
+
+def format_annotation_line(fields: str, confidences: List[float], i: int) -> str:
+    """
+    Append the per-object confidence score to an annotation line when ``confidences`` is
+    provided, as the trailing field written by both ``save_obb_annotations`` and
+    ``save_polygon_annotations``.
+    """
+    if confidences is not None:
+        fields += f" {confidences[i]:.4f}"
+    return fields
 
 
 def save_obb_annotations(obb_annotations: np.ndarray, obb_dir: Path, img_path: Path, confidences: List[float] = None):
@@ -579,18 +632,14 @@ def save_obb_annotations(obb_annotations: np.ndarray, obb_dir: Path, img_path: P
     Each line is ``class x1 y1 x2 y2 x3 y3 x4 y4``. When ``confidences`` is provided, a 10th
     field with the per-OBB confidence score is appended (``... x4 y4 conf``).
     """
-    if obb_dir is None:
-        obb_dir = img_path.parent.parent / "labels_obb"
-    obb_dir.mkdir(exist_ok=True, parents=True)
+    obb_dir = resolve_output_dir(obb_dir, img_path, "labels_obb")
     save_filepath = obb_dir / (img_path.stem + ".txt")
 
     with open(save_filepath, "w", encoding="utf-8") as f:
         for i, obb in enumerate(obb_annotations):
             label, x1, y1, x2, y2, x3, y3, x4, y4 = map(int, obb)
             line = f"{label} {x1} {y1} {x2} {y2} {x3} {y3} {x4} {y4}"
-            if confidences is not None:
-                line += f" {confidences[i]:.4f}"
-            f.write(line + "\n")
+            f.write(format_annotation_line(line, confidences, i) + "\n")
 
 
 def save_polygon_annotations(
@@ -631,9 +680,7 @@ def save_polygon_annotations(
             f"contours for {len(obb_annotations)} OBBs"
         )
 
-    if polygon_dir is None:
-        polygon_dir = img_path.parent.parent / "labels_polygon"
-    polygon_dir.mkdir(exist_ok=True, parents=True)
+    polygon_dir = resolve_output_dir(polygon_dir, img_path, "labels_polygon")
     save_filepath = polygon_dir / (img_path.stem + ".txt")
 
     with open(save_filepath, "w", encoding="utf-8") as f:
@@ -644,9 +691,7 @@ def save_polygon_annotations(
             else:
                 points = simplify_contour(contours[i], simplify_epsilon)
             line = f"{int(obb[0])} " + " ".join(f"{int(x)} {int(y)}" for x, y in points)
-            if confidences is not None:
-                line += f" {confidences[i]:.4f}"
-            f.write(line + "\n")
+            f.write(format_annotation_line(line, confidences, i) + "\n")
 
 
 def simplify_contour(contour: np.ndarray, epsilon: float) -> np.ndarray:

@@ -169,7 +169,7 @@ def main_hbb2obb():
 
     import tqdm
 
-    from hbb2obb.converter import hbb2obb, save_obb_annotations, save_polygon_annotations
+    from hbb2obb.converter import hbb2obb, save_obb_annotations, save_polygon_annotations, unpack_results
     from hbb2obb.utils import get_image_paths, process_ultralytics_kwargs
 
     model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
@@ -198,10 +198,9 @@ def main_hbb2obb():
         )
 
         # Unpack the extras hbb2obb() appends for the flags that were requested
-        values = list(result) if isinstance(result, tuple) else [result]
-        obb_annotations = values.pop(0)
-        confidences = values.pop(0) if args.save_confidence else None
-        contours = values.pop(0) if args.save_polygon else None
+        obb_annotations, confidences, contours = unpack_results(
+            result, return_confidence=args.save_confidence, return_contours=args.save_polygon
+        )
 
         save_obb_annotations(obb_annotations, args.obb_dir, img_path, confidences=confidences)
         if args.save_polygon:
