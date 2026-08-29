@@ -6,7 +6,13 @@
 HBB2OBB Hyperparameter Optimization Tool
 
 This script finds optimal hyperparameters for HBB2OBB conversion by evaluating
-different combinations of inference image sizes and scale factors using grid search.
+different combinations of inference image sizes, scale factors, and morphological
+opening kernel sizes using grid search.
+
+The grid is the full product of the three axes, and every grid point runs a complete
+SAM pass over the whole image set, so the cost multiplies quickly: the defaults are
+3 image sizes x 12 scale factors x 1 opening kernel = 36 runs, and sweeping three
+kernels instead of one triples that to 108.
 
 It supports customization of evaluation criteria, filtering options, and provides
 detailed outputs of performance metrics including IoU scores and execution time.
@@ -23,6 +29,8 @@ Common Options:
     --sam_models, -sm    SAM model variant (default: sam_b)
     --scale_factors, -sf Scale factors to test (default: range from -0.01 to 0.1)
     --imgsz, -iz         Image sizes to test (default: [640, 960, 1280])
+    --opening_kernels, -ok  Opening kernel percentages to test (default: [0.15], a single value,
+                            so the default grid size is unchanged)
     --output_folder, -o  Results save location (default: img_source/../benchmark_results)
     --run_name, -n       Custom name for this benchmark run (default: timestamp)
 
@@ -44,6 +52,9 @@ Examples:
 
     # Custom scale factors and image sizes
     python scripts/optimize_hbb2obb.py data/images data/labels_obb_gt --scale_factors 0.05 0.1 --imgsz 640 960
+
+    # Sweep all three axes (2 x 3 x 3 = 18 runs)
+    python scripts/optimize_hbb2obb.py data/images data/labels_obb_gt --imgsz 960 1280 --scale_factors 0.03 0.05 0.07 --opening_kernels 0.0 0.15 0.3
 
     # Specify multiple SAM models
     python scripts/optimize_hbb2obb.py data/images data/labels_obb_gt --sam_models sam_b sam_l sam2_b sam2.1_b
@@ -85,13 +96,17 @@ def parse_cli_args():
     # Optional arguments
     parser.add_argument("--hbb_dir", "-hd", type=Path, help="Directory containing HBB annotations (default: img_source/../labels_hbb)")
     parser.add_argument("--sam_models", "-sm", type=str, default=["sam_b"], nargs='+', choices=SUPPORTED_SAM_MODELS, help="SAM model(s) to use")
-    parser.add_argument("--opening_kernel_percentage", "-okp", type=float, default=0.15,
-        help="Percentage of mask's smaller dimension for morphological opening. Ignored if <= 0.")
 
     # Hyperparameters to optimize
     parser.add_argument("--scale_factors", "-sf", type=float, nargs='+', default=[-0.01, 0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1],
                         help="List of scale factors to test")
     parser.add_argument("--imgsz", "-iz", type=int, nargs='+', default=[640, 960, 1280], help="List of image sizes to test")
+    parser.add_argument("--opening_kernels", "-ok", type=float, nargs='+', default=[0.15],
+                        help="List of morphological opening kernel percentages to test (percentage of the mask's "
+                             "smaller dimension; a value <= 0 disables the opening). Third grid axis: the run "
+                             "performs len(imgsz) x len(scale_factors) x len(opening_kernels) full SAM passes over "
+                             "the image set, so the defaults give 3 x 12 x 1 = 36 runs, and passing three kernels "
+                             "instead of the default single one triples that to 108")
 
     # Evaluation options
     parser.add_argument("--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class labels to exclude from evaluation")
@@ -120,8 +135,9 @@ def main():
     # Parameter combinations
     image_sizes = args.imgsz
     scale_factors = args.scale_factors
+    opening_kernels = args.opening_kernels
     # Create parameter grid
-    param_grid = list(product(image_sizes, scale_factors))
+    param_grid = list(product(image_sizes, scale_factors, opening_kernels))
 
     # Determine output folder
     if args.output_folder is None:
@@ -151,6 +167,7 @@ def main():
         "sam_models": args.sam_models,
         "scale_factors": args.scale_factors,
         "imgsz": args.imgsz,
+        "opening_kernels": args.opening_kernels,
         "excluded_classes": list(args.excluded_classes),
         "iou_threshold": args.iou_threshold,
         "class_agnostic": args.class_agnostic,
@@ -166,7 +183,7 @@ def main():
 
     # Print configuration
     print("Configuration:")
-    print("-" * 105)
+    print("-" * 116)
     print(f"Run Name: {run_name}")
     print(f"Image Source: {args.img_source}")
     print(f"Ground Truth Directory: {args.gt_dir}")
@@ -174,15 +191,20 @@ def main():
     print(f"Output Folder: {output_folder}")
     print(f"Scale Factors: {args.scale_factors}")
     print(f"Image Sizes: {args.imgsz}")
+    print(f"Opening Kernels: {args.opening_kernels}")
     print(f"Excluded Classes: {args.excluded_classes}")
     print(f"IoU Threshold: {args.iou_threshold}")
     print(f"Class Agnostic: {args.class_agnostic}")
     print(f"Model Kwargs: {args.model_kwargs}")
-    print("-" * 105)
+    print("-" * 116)
     print("Starting evaluation...")
-    print("-" * 105)
-    print(f"Total combinations to evaluate: {len(param_grid)}")
-    print("-" * 105)
+    print("-" * 116)
+    print(
+        f"Total combinations to evaluate: {len(param_grid)} "
+        f"({len(image_sizes)} image size(s) x {len(scale_factors)} scale factor(s) "
+        f"x {len(opening_kernels)} opening kernel(s)), each a full SAM pass over the image set"
+    )
+    print("-" * 116)
 
     results = []
     best_iou = 0
@@ -194,14 +216,14 @@ def main():
         print(f"Temporary directory created: {temp_dir_path}")
 
         print("\nTesting parameter combinations:")
-        print("-" * 105)
-        print(f"{'Image Size':<12} {'Scale Factor':<15} {'Avg IoU':<17} {'Matches':<10} {'GT Total':<10} {'Pred Total':<10} {'IoU Threshold':<15} {'Time (s)':<10}")
-        print("-" * 105)
+        print("-" * 116)
+        print(f"{'Image Size':<12} {'Scale Factor':<15} {'Kernel':<10} {'Avg IoU':<17} {'Matches':<10} {'GT Total':<10} {'Pred Total':<10} {'IoU Threshold':<15} {'Time (s)':<10}")
+        print("-" * 116)
 
         # Evaluate each combination
-        for imgsz, sf in param_grid:
+        for imgsz, sf, ok in param_grid:
             # Create subdirectory for this run
-            run_dir = temp_dir_path / f"imgsz_{imgsz}_ef_{sf}"
+            run_dir = temp_dir_path / f"imgsz_{imgsz}_sf_{sf}_ok_{ok}"
             run_dir.mkdir()
 
             # Run HBB2OBB conversion
@@ -209,7 +231,8 @@ def main():
                 ["hbb2obb", str(args.img_source), "--hbb_dir", str(hbb_dir),
                  "--obb_dir", str(run_dir), "--sam_models"]
                 + args.sam_models
-                + ["--scale_factors", str(sf), "--imgsz", str(imgsz), "--no_bar"]
+                + ["--scale_factors", str(sf), "--imgsz", str(imgsz),
+                   "--opening_kernel_percentage", str(ok), "--no_bar"]
             )
 
             if args.model_kwargs:
@@ -246,6 +269,7 @@ def main():
             param_result = {
                 "imgsz": int(imgsz),
                 "scale_factor": float(sf),
+                "opening_kernel_percentage": float(ok),
                 "avg_iou": float(avg_iou),
                 "std_iou": float(std_iou),
                 "total_matches": int(total_matches),
@@ -264,7 +288,7 @@ def main():
                 best_params = param_result
 
             # Print result line
-            print(f"{imgsz:<12} {sf:^15.3f} {avg_iou:<1.4f} ± {std_iou:<1.4f}   {total_matches:<10} {total_gt:<10} {total_pred:<10} {args.iou_threshold:<15} {execution_time:<10.2f}")
+            print(f"{imgsz:<12} {sf:^15.3f} {ok:^10.3f} {avg_iou:<1.4f} ± {std_iou:<1.4f}   {total_matches:<10} {total_gt:<10} {total_pred:<10} {args.iou_threshold:<15} {execution_time:<10.2f}")
 
     # Save detailed results
     results_file = run_folder / "results.yaml"
@@ -284,6 +308,7 @@ def main():
         f.write("BEST PARAMETERS:\n")
         f.write(f"  Image Size: {best_params['imgsz']}\n")
         f.write(f"  Scale Factor: {best_params['scale_factor']:.4f}\n")
+        f.write(f"  Opening Kernel: {best_params['opening_kernel_percentage']:.4f}\n")
         f.write(f"  Average IoU: {best_params['avg_iou']:.4f} ± {best_params['std_iou']:.4f}\n")
         f.write(f"  Total Matches: {best_params['total_matches']}\n")
         f.write(f"  Total GT: {best_params['total_gt']}\n")
@@ -294,20 +319,21 @@ def main():
         # Sort results by avg_iou descending
         sorted_results = sorted(results, key=lambda x: x['avg_iou'], reverse=True)
         for i, result in enumerate(sorted_results):
-            f.write(f"{i+1:4d}. ImgSz: {result['imgsz']:5d}, SF: {result['scale_factor']:7.4f}, IoU: {result['avg_iou']:7.4f} ± {result['std_iou']:7.4f}, Time: {result['execution_time']:5.2f}s\n")
+            f.write(f"{i+1:4d}. ImgSz: {result['imgsz']:5d}, SF: {result['scale_factor']:7.4f}, K: {result['opening_kernel_percentage']:7.4f}, IoU: {result['avg_iou']:7.4f} ± {result['std_iou']:7.4f}, Time: {result['execution_time']:5.2f}s\n")
 
     # Print best parameters
-    print("\n" + "=" * 105)
+    print("\n" + "=" * 116)
     print("BEST PARAMETERS:")
     print(f"  Image Size: {best_params['imgsz']}")
     print(f"  Scale Factor: {best_params['scale_factor']:.4f}")
+    print(f"  Opening Kernel: {best_params['opening_kernel_percentage']:.4f}")
     print(f"  Average IoU: {best_params['avg_iou']:.4f} ± {best_params['std_iou']:.4f}")
     print(f"  Total Matches: {best_params['total_matches']}")
     print(f"  Total GT: {best_params['total_gt']}")
     print(f"  Total Pred: {best_params['total_pred']}")
     print(f"  Execution Time: {best_params['execution_time']:.2f} seconds")
     print(f"\nResults saved to: {run_folder}")
-    print("=" * 105)
+    print("=" * 116)
 
 
 if __name__ == "__main__":

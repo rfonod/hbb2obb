@@ -261,7 +261,7 @@ Starting from [LabelMe](https://github.com/wkentaro/labelme) JSON annotations fo
 python scripts/json2yolo.py project/json_hbb -td project/labels_hbb
 python scripts/json2yolo.py project/json_obb_gt -td project/labels_obb_gt
 
-# 2. Optimize hyperparameters to find the best settings
+# 2. Optimize hyperparameters to find the best settings (add -ok to also sweep the opening kernel)
 python scripts/optimize_hbb2obb.py project/images project/labels_obb_gt -sm sam_b sam_l sam2_b -n multi_sam
 
 # 3. Inspect the best parameters, then convert with them
@@ -306,9 +306,16 @@ python scripts/yolo2json.py /path/to/yolo /path/to/label_map.yaml
 # Search inference resolutions x scale factors for one or more SAM models
 python scripts/optimize_hbb2obb.py /path/to/images /path/to/ground_truth -sm sam_b sam_l sam2_b sam2.1_b -n multi_sam
 
+# Add the opening kernel as a third axis (2 x 3 x 3 = 18 grid points)
+python scripts/optimize_hbb2obb.py /path/to/images /path/to/ground_truth -iz 960 1280 -sf 0.03 0.05 0.07 -ok 0.0 0.15 0.3
+
 # Visualize the results
 python scripts/plot_optimization_results.py /path/to/optimization_results
 ```
+
+The grid is the full product of `--imgsz` x `--scale_factors` x `--opening_kernels`, and each grid point is a complete SAM pass over the whole image set, so the cost multiplies quickly: the defaults (3 image sizes, 12 scale factors, 1 opening kernel) already amount to 36 runs, and sweeping three kernels instead of one triples that to 108. `--opening_kernels` / `-ok` defaults to the single value `0.15`, so omitting it leaves the two-axis sweep and its grid size unchanged.
+
+The plot colours each series by image size and, when more than one opening kernel was swept, distinguishes the kernels by marker shape.
 
 ## Data Format
 
