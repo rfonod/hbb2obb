@@ -8,7 +8,7 @@
 # does the models/ directory the SAM checkpoints are read from.
 #
 # Each run sweeps the full product of the three axes below, and every grid point is a complete
-# SAM pass over every image, so the cost multiplies: 3 x 12 x 1 = 36 passes per run, 612 in
+# SAM pass over every image, so the cost multiplies: 3 x 12 x 1 = 36 passes per run, 648 in
 # total. A run writes into <output_folder>/<name>, and name defaults to its models joined
 # by "-", which is where these folder names come from.
 
@@ -35,18 +35,25 @@ runs:
   - sam_models: [sam_b]
   - sam_models: [sam_l]
 
-  # Ensembles: masks are aggregated by majority vote, so an even-sized ensemble is stricter
-  # than the next larger odd one, and a weak member can pull a good ensemble down. A pair is
-  # the strict extreme, an intersection: both models must claim a pixel for it to survive.
-  - sam_models: [sam2_b, sam2.1_b]
+  # Ensembles, as three ladders of three. Masks are aggregated by majority vote, so an
+  # even-sized ensemble is stricter than the next larger odd one: a pair is the strict
+  # extreme, an intersection, since both models must claim a pixel for it to survive.
+  #
+  # Every ladder grows 2 -> 3 -> 4 by adding the next weaker model, so reading across a
+  # ladder isolates ensemble size, and reading down the three at one size isolates member
+  # quality. Picking ensembles ad hoc conflates the two and answers neither question.
+
+  # Strong: the best checkpoints available
   - sam_models: [sam_l, sam_b]
-  - sam_models: [sam2_t, sam2.1_t, mobile_sam]
-  - sam_models: [sam_l, sam_b, sam2_b]
   - sam_models: [sam_l, sam_b, sam2.1_b]
   - sam_models: [sam_l, sam_b, sam2_b, sam2.1_b]
-  - sam_models: [sam_l, sam_b, sam2_b, sam2.1_b, sam2_s]
 
-  # The same four plus a weak fifth instead of a strong one. This is the counterexample the
-  # comparison plot needs: it costs more than the four and scores below them, which is what
-  # stops "add another model" from reading as a rule.
-  - sam_models: [sam_l, sam_b, sam2_b, sam2.1_b, mobile_sam]
+  # Mixed: one large model carrying progressively weaker company
+  - sam_models: [sam_l, sam2.1_t]
+  - sam_models: [sam_l, sam2.1_t, sam2_t]
+  - sam_models: [sam_l, sam2.1_t, sam2_t, mobile_sam]
+
+  # Light: no SAM1 at all, the base checkpoints first and then the tiny ones
+  - sam_models: [sam2_b, sam2.1_b]
+  - sam_models: [sam2_b, sam2.1_b, sam2.1_t]
+  - sam_models: [sam2_b, sam2.1_b, sam2.1_t, sam2_t]
