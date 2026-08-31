@@ -41,7 +41,7 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 from hbb2obb.__version__ import __version__
 
 DEPENDENCIES = ("ultralytics", "torch", "torchvision", "opencv-python", "numpy", "shapely", "matplotlib", "PyYAML")
-IMAGE_PATTERNS = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.JPG", "*.JPEG", "*.PNG")
+IMAGE_PATTERNS = ("*.[jJ][pP][gG]", "*.[jJ][pP][eE][gG]", "*.[pP][nN][gG]", "*.[bB][mM][pP]")
 RULE = "-" * 78
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
