@@ -242,15 +242,21 @@ def sweep(
 
             start_time = time.time()
             for img_path in image_paths:
-                obb_annotations = converter.hbb2obb(
-                    img_path=img_path,
-                    hbb_dir=hbb_dir,
-                    sam_models=spec.sam_models,
-                    imgsz=imgsz,
-                    scale_factors=sf,
-                    opening_kernel_percentage=ok,
-                    model_kwargs=model_kwargs,
-                )
+                # A malformed HBB file is a per-image problem, not a reason to lose the rest of an
+                # hours-long sweep: skip it and keep going, the same way the viewer warns and moves on.
+                try:
+                    obb_annotations = converter.hbb2obb(
+                        img_path=img_path,
+                        hbb_dir=hbb_dir,
+                        sam_models=spec.sam_models,
+                        imgsz=imgsz,
+                        scale_factors=sf,
+                        opening_kernel_percentage=ok,
+                        model_kwargs=model_kwargs,
+                    )
+                except ValueError as e:
+                    print(f"Warning: skipping {img_path.name}: {e}")
+                    continue
                 converter.save_obb_annotations(obb_annotations, run_dir, img_path)
             execution_time = time.time() - start_time
 
