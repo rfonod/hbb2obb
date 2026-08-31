@@ -298,7 +298,7 @@ No HBBs yet? `hbb2obb-detect` runs an Ultralytics detector over your images and 
 # geo-trax is the default detector, tuned for vehicles in high-altitude drone imagery (weights downloaded on first use)
 hbb2obb-detect /path/to/images
 
-# Any other Hugging Face model: the full '<repo_id>/<filename>.pt', not just '<repo_id>' (no "huggingface.co/" prefix)
+# Any other Hugging Face model: all three parts, '<user>/<repo>/<file>.pt' (no "huggingface.co/" prefix)
 hbb2obb-detect /path/to/images --model rfonod/geo-trax/geotrax_hbb_yolov8s_1920_v1.pt
 
 # Then convert, carrying the detector confidence into the OBBs alongside the conversion score
@@ -308,7 +308,7 @@ hbb2obb /path/to/images --save_confidence --confidence_source combined
 <details>
 <summary><b>More about <code>--model</code>, class maps, and merging with hand-drawn boxes</b></summary>
 
-`--model` takes a registered detector ([`geotrax`](https://github.com/rfonod/geo-trax) today, the default), any Ultralytics model name or `.pt` path, or a Hugging Face reference written as `<repo_id>/<file>.pt`. Weights land in `models/` beside the SAM checkpoints. A registered detector brings the settings it was validated at, so `geotrax` runs at `--imgsz 1920` over its four reliable classes; anything else starts from the Ultralytics defaults and is yours to set. A detector trained on COCO numbers its classes differently from yours, which is what `--class_map` is for: `--class_map '2=0,5=1,7=2,3=3'` turns COCO's car, bus, truck and motorcycle into `0,1,2,3` and drops every other class.
+`--model` takes a registered detector ([`geotrax`](https://github.com/rfonod/geo-trax) today, the default), any Ultralytics model name or `.pt` path, or a Hugging Face reference written as `<user>/<repo>/<file>.pt`. All three parts are required, even when the repo holds only one file: Hugging Face's download API always names the exact file rather than picking one for you. Weights land in `models/` beside the SAM checkpoints. A registered detector brings the settings it was validated at, so `geotrax` runs at `--imgsz 1920` over its four reliable classes; anything else starts from the Ultralytics defaults and is yours to set. A detector trained on COCO numbers its classes differently from yours, which is what `--class_map` is for: `--class_map '2=0,5=1,7=2,3=3'` turns COCO's car, bus, truck and motorcycle into `0,1,2,3` and drops every other class.
 
 Detected boxes are a starting point, not ground truth. If you have hand-drawn boxes already and only want the confidence a detector would give them, `--merge_with` keeps your geometry untouched and only attaches the score of the detection covering each box:
 

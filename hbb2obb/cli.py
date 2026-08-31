@@ -266,7 +266,7 @@ def main_hbb2obb_detect():
         type=str,
         default="geotrax",
         help="Registered detector (default: geotrax), an Ultralytics model name or .pt path, or a "
-        "Hugging Face reference written as '<repo_id>/<file>.pt'",
+        "Hugging Face reference written as '<user>/<repo>/<file>.pt'",
     )
 
     detect_group = parser.add_argument_group('detection options')

@@ -25,7 +25,7 @@ import numpy as np
 
 # Curated detectors that are not Ultralytics' own, keyed by the name --model accepts. Anything
 # not listed here is passed through: an Ultralytics model name or a path to a local .pt file,
-# or a Hugging Face reference written as '<repo_id>/<file>.pt'.
+# or a Hugging Face reference written as '<user>/<repo>/<file>.pt'.
 HF_URL = "https://huggingface.co/{repo}/resolve/main/{filename}"
 
 
@@ -84,10 +84,12 @@ def resolve_weights(model: str) -> Path:
     Resolve a ``--model`` value to a weights file on disk, downloading it if it is not there yet.
 
     Four things are accepted, in this order: a name in ``SUPPORTED_DETECTORS``, a path to an
-    existing file, a Hugging Face reference ``<repo_id>/<file>.pt``, and an Ultralytics model
+    existing file, a Hugging Face reference ``<user>/<repo>/<file>.pt``, and an Ultralytics model
     name such as ``yolo11s.pt``. Everything lands in ``models/`` beside the SAM checkpoints,
     which is the convention the rest of the package uses, and the Ultralytics names are left
-    for Ultralytics itself to fetch on first use.
+    for Ultralytics itself to fetch on first use. All three Hugging Face parts are required:
+    the resolve URL it builds names an exact file, and there is no way to ask for "the" file
+    in a repo without naming it, even when the repo holds only one.
     """
     if model in SUPPORTED_DETECTORS:
         spec = SUPPORTED_DETECTORS[model]
