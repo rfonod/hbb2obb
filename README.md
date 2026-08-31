@@ -51,9 +51,9 @@
 
 HBB2OBB integrates with and complements several specialized tools:
 
-- **[Geo-trax](https://github.com/rfonod/geo-trax) 🛰️**: georeferenced vehicle trajectory extraction pipeline for high-altitude drone imagery, built on YOLO detection and multi-object tracking. Its vehicle detector supplies the HBB inputs for vehicle use cases (car, bus, truck, motorcycle), and `hbb2obb-detect --model geotrax` runs that detector directly ([details](#detecting-hbbs)).
+- **[Geo-trax](https://github.com/rfonod/geo-trax) 🚀**: georeferenced vehicle trajectory extraction pipeline for high-altitude drone imagery, built on YOLO detection and multi-object tracking. Its vehicle detector supplies the HBB inputs for vehicle use cases (car, bus, truck, motorcycle), and `hbb2obb-detect` runs it by default ([details](#detecting-hbbs)).
 
-- **[Stabilo](https://github.com/rfonod/stabilo) 🌀**: Python library for video and trajectory stabilization using robust homography transformations. Supports various feature detectors, RANSAC algorithms, and user-defined masks.
+- **[Stabilo](https://github.com/rfonod/stabilo) ⚖️**: Python library for video and trajectory stabilization using robust homography transformations. Supports various feature detectors, RANSAC algorithms, and user-defined masks.
 
 - **[Stabilo-Optimize](https://github.com/rfonod/stabilo-optimize) 🎯**: benchmarking and hyperparameter optimization framework for Stabilo. Evaluates stabilization performance through ground truth-free assessment using random perturbations.
 
@@ -144,28 +144,6 @@ hbb2obb-view data/images --compare data/labels_obb_gt
 Converted OBB annotations are written to `data/labels_obb/`. Every command takes `--help`.
 
 ## Usage
-
-### Detecting HBBs
-
-HBB2OBB converts boxes you already have. If you don't have any, `hbb2obb-detect` runs an Ultralytics detector over your images and writes exactly the YOLO TXT the conversion reads, with the detector confidence in the 6th column:
-
-```bash
-# Vehicles in high-altitude drone imagery, with the Geo-trax detector (downloaded on first use)
-hbb2obb-detect /path/to/images --model geotrax   # weights: huggingface.co/rfonod/geo-trax
-
-# Then convert, carrying the detector confidence into the OBBs alongside the conversion score
-hbb2obb /path/to/images --save_confidence --confidence_source combined
-```
-
-`--model` takes a registered detector ([`geotrax`](https://github.com/rfonod/geo-trax) today), any Ultralytics model name or `.pt` path, or a Hugging Face reference written as `<repo_id>/<file>.pt`. Weights land in `models/` beside the SAM checkpoints. A registered detector brings the settings it was validated at, so `geotrax` runs at `--imgsz 1920` over its four reliable classes; anything else starts from the Ultralytics defaults and is yours to set. A detector trained on COCO numbers its classes differently from yours, which is what `--class_map` is for: `--class_map '2=0,5=1,7=2,3=3'` turns COCO's car, bus, truck and motorcycle into `0,1,2,3` and drops every other class.
-
-Detected boxes are a starting point, not ground truth. If you have hand-drawn boxes already and only want the confidence a detector would give them, `--merge_with` keeps your geometry untouched and only attaches the score of the detection covering each box:
-
-```bash
-hbb2obb-detect /path/to/images --merge_with /path/to/labels_hbb --extras_dir /tmp/extras --overwrite
-```
-
-Your boxes stay exactly as they are, in their own order; a box no detection covers keeps `1.0`, because a box somebody drew by hand is not less certain than one a model proposed. Detections that back no box of yours are counted and, with `--extras_dir`, written as their own set so you can look at them (`hbb2obb-view /path/to/images --hbb_dir /tmp/extras`) and decide whether they are objects you missed. The merge never adds them for you, and `--overwrite` is required before anything writes into a directory that already holds labels.
 
 ### Converting HBB to OBB
 
@@ -309,6 +287,36 @@ hbb2obb-view project/images --compare project/labels_obb_gt --show_confidence
 # 5. Ship the result in every format your consumers want
 hbb2obb-convert project/labels_obb --to dota coco voc -o project/release -mp project/label_map.yaml
 ```
+
+</details>
+
+### Detecting HBBs
+
+No HBBs yet? `hbb2obb-detect` runs an Ultralytics detector over your images and writes exactly the YOLO TXT the conversion reads, with the detector confidence in the 6th column:
+
+```bash
+# geo-trax is the default detector, tuned for vehicles in high-altitude drone imagery (weights downloaded on first use)
+hbb2obb-detect /path/to/images
+
+# Any other Hugging Face model: the full '<repo_id>/<filename>.pt', not just '<repo_id>' (no "huggingface.co/" prefix)
+hbb2obb-detect /path/to/images --model rfonod/geo-trax/geotrax_hbb_yolov8s_1920_v1.pt
+
+# Then convert, carrying the detector confidence into the OBBs alongside the conversion score
+hbb2obb /path/to/images --save_confidence --confidence_source combined
+```
+
+<details>
+<summary><b>More about <code>--model</code>, class maps, and merging with hand-drawn boxes</b></summary>
+
+`--model` takes a registered detector ([`geotrax`](https://github.com/rfonod/geo-trax) today, the default), any Ultralytics model name or `.pt` path, or a Hugging Face reference written as `<repo_id>/<file>.pt`. Weights land in `models/` beside the SAM checkpoints. A registered detector brings the settings it was validated at, so `geotrax` runs at `--imgsz 1920` over its four reliable classes; anything else starts from the Ultralytics defaults and is yours to set. A detector trained on COCO numbers its classes differently from yours, which is what `--class_map` is for: `--class_map '2=0,5=1,7=2,3=3'` turns COCO's car, bus, truck and motorcycle into `0,1,2,3` and drops every other class.
+
+Detected boxes are a starting point, not ground truth. If you have hand-drawn boxes already and only want the confidence a detector would give them, `--merge_with` keeps your geometry untouched and only attaches the score of the detection covering each box:
+
+```bash
+hbb2obb-detect /path/to/images --merge_with /path/to/labels_hbb --extras_dir /tmp/extras --overwrite
+```
+
+Your boxes stay exactly as they are, in their own order; a box no detection covers keeps `1.0`, because a box somebody drew by hand is not less certain than one a model proposed. Detections that back no box of yours are counted and, with `--extras_dir`, written as their own set so you can look at them (`hbb2obb-view /path/to/images --hbb_dir /tmp/extras`) and decide whether they are objects you missed. The merge never adds them for you, and `--overwrite` is required before anything writes into a directory that already holds labels.
 
 </details>
 
