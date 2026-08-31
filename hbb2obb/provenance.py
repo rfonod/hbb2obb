@@ -145,8 +145,10 @@ def git_state(repo: Optional[Path] = None, package_root: Path = PACKAGE_ROOT) ->
 
 
 def resolve_model(name: str, models_dir: Path) -> Path:
-    """Mirror converter.load_sam_model: <models_dir>/<name>.pt unless a suffix is given."""
-    return models_dir / (name if name.endswith(".pt") else f"{name}.pt")
+    """Where a checkpoint lives, per the one formula converter.load_sam_model itself resolves it by."""
+    from hbb2obb.converter import sam_checkpoint_path
+
+    return sam_checkpoint_path(name, models_dir)
 
 
 def count(directory: Optional[Path], pattern: str) -> str:

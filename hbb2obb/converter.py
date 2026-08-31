@@ -16,6 +16,15 @@ from hbb2obb.utils import Annotations, get_hbb_dir
 _MODEL_CACHE: Dict[str, Any] = {}
 
 
+def sam_checkpoint_path(model_name: str, models_dir: Path = Path('models')) -> Path:
+    """
+    Where a SAM/FastSAM checkpoint lives for a given model name: ``<models_dir>/<name>.pt``,
+    unless a suffix is already given. The one place this rule is written, so provenance can
+    report the exact path a run resolved rather than a second copy of the same formula.
+    """
+    return models_dir / (model_name if model_name.endswith(".pt") else f"{model_name}.pt")
+
+
 def load_sam_model(model_name: str):
     """
     Load a SAM/FastSAM model by name, reusing a cached instance when one is already loaded.
@@ -26,7 +35,7 @@ def load_sam_model(model_name: str):
     Returns:
         The loaded ultralytics SAM or FastSAM model instance.
     """
-    model_path = Path('models') / (model_name if model_name.endswith(".pt") else f"{model_name}.pt")
+    model_path = sam_checkpoint_path(model_name)
     cache_key = str(model_path)
     if cache_key not in _MODEL_CACHE:
         _MODEL_CACHE[cache_key] = FastSAM(model_path) if "FastSAM" in model_name else SAM(model_path)
