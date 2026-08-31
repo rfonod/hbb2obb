@@ -540,7 +540,7 @@ The two measure different things: `conversion` says how well the OBB fits the se
 
 ## Best Practices
 
-- For optimal results, combine multiple SAM models, e.g. `--sam_models sam_b sam_l sam2_b sam2.1_b sam3`.
+- For optimal results, combine multiple SAM models of comparable strength, e.g. `--sam_models sam_b sam_l sam2_b sam2.1_b`. Adding a weaker model is not free: with majority voting, two weak members can outvote a strong one, so measure rather than assume.
 - Experiment with scale factors and inference resolutions based on your dataset.
 - Run `hbb2obb-optimize` to find the best settings for your data, and `--save_provenance` to record the ones you settled on.
 - Use class-agnostic evaluation when comparing against manually annotated ground truth with different class labels.

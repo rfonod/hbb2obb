@@ -193,7 +193,7 @@ hbb2obb-optimize -c data/benchmark.yaml             # the whole thing
 hbb2obb-optimize -c data/benchmark.yaml --refresh   # only redraw the plots and summary.md
 ```
 
-Ten model combinations, each a full grid of 3 inference sizes x 12 scale factors x 1 opening kernel, so 36 SAM passes per combination and 360 in total. That took about two hours on a laptop CPU; `--resume` skips the combinations already finished, which is what makes a longer run on your own data survivable. To sweep something else once, without touching the config:
+Eighteen model combinations, each a full grid of 3 inference sizes x 12 scale factors x 1 opening kernel, so 36 SAM passes per combination and 648 in total. That took 2.92 hours on a laptop CPU; `--resume` skips the combinations already finished, which is what makes a longer run on your own data survivable. To sweep something else once, without touching the config:
 
 ```bash
 hbb2obb-optimize data/images data/labels_obb_gt -sm sam_b -iz 960 1280 -sf 0.03 0.05 -n quick
@@ -218,7 +218,17 @@ The `benchmark_results` directory holds the sweeps described in step 6, one subf
 
 **[`benchmark_results/summary.md`](benchmark_results/summary.md) is the generated write-up:** every run's best grid point in one table, sorted by IoU, with the winner named and `comparison.png` showing accuracy against compute. [`benchmark_results/PROVENANCE.txt`](benchmark_results/PROVENANCE.txt) records the checkpoint hashes, the hashes of the label sets the numbers were measured against, a digest of the hbb2obb source that ran, the library versions and the command. Both are written by the same command that produces the runs, so neither can drift from them, and `benchmark.yaml` is copied in beside them so the folder re-runs without this repository.
 
-Three things this grid says, all of them worth taking as hypotheses to test on your own data rather than as findings. 1280 px wins every single run, and by a wide margin over 640 px. An ensemble beats any of its members, but the best of them (`sam_l sam_b sam2_b sam2.1_b`, 0.9079) is 0.0115 IoU above `sam_b` alone for about 4.6 times the compute, so the curve in `comparison.png` is mostly flat past the first model. And adding a weak model can cost you: dropping `mobile_sam` from the five-model ensemble takes it from 0.8993 to 0.9079, which is what majority voting over an ensemble that disagrees with itself looks like.
+The nine ensembles are arranged as **three ladders**, each growing from two models to four by adding the next weaker one, so that reading across a ladder varies ensemble size at roughly fixed member quality and reading down the three ladders at one size varies quality at fixed size. What they say, all of it worth taking as a hypothesis to test on your own data rather than as a finding:
+
+| Ladder | 2 models | 3 models | 4 models |
+| :--- | ---: | ---: | ---: |
+| Strong (`sam_l`, `sam_b`, then the SAM2 base pair) | 0.9005 | 0.9066 | **0.9079** |
+| Mixed (`sam_l`, then tiny models) | 0.9008 | 0.8723 | 0.8890 |
+| Light (SAM2 base pair, then the tiny ones) | 0.8879 | 0.8842 | 0.8860 |
+
+**More models help only when the models you add are themselves strong.** The strong ladder rises at every step. Neither other ladder does, and the mixed one collapses at three before partly recovering at four. **Majority voting explains the shape:** a pair needs both members to agree, so it is an intersection and the large model holds a veto; three members need only two, so the two tiny models can outvote `sam_l` between them and drag the result down to roughly what they produce alone (0.8723 against their own 0.8665 and 0.8689); four members need three again, which is strict enough to recover part of the loss. Ensemble size is therefore not a dial that turns one way.
+
+**The cheapest good configuration is a large model paired with a tiny one.** `sam_l sam2.1_t` reaches 0.9008 in 34 s, edging out `sam_l sam_b` (0.9005) in three quarters of the time, and both beat `sam_l` alone (0.8989). **1280 px wins all eighteen runs**, by a wide margin over 640 px. And **within SAM2 the small checkpoints buy nothing over the tiny ones:** `sam2_s` (0.8652) and `sam2.1_s` (0.8648) sit at or just below `sam2_t` (0.8665) and `sam2.1_t` (0.8689); only the base checkpoints pull ahead (0.8803 and 0.8829). The 2.1 release edges out its 2.0 counterpart at tiny and base, and ties at small.
 
 The `sam_b` run is the configuration `labels_obb/` was produced with, which is why its best IoU, 0.8964 ± 0.0683 at 1280 px and scale factor 0.05, is the number step 5 prints.
 

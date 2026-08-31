@@ -1,0 +1,59 @@
+# The benchmark shipped in data/benchmark_results. Reproduce all of it with:
+#
+#   hbb2obb-optimize -c data/benchmark.yaml --dry_run   # what it will do, and what it will cost
+#   hbb2obb-optimize -c data/benchmark.yaml             # about three hours on a laptop CPU
+#   hbb2obb-optimize -c data/benchmark.yaml --refresh   # only redraw the plots and summary.md
+#
+# Run it from the repository root: paths here resolve against the working directory, and so
+# does the models/ directory the SAM checkpoints are read from.
+#
+# Each run sweeps the full product of the three axes below, and every grid point is a complete
+# SAM pass over every image, so the cost multiplies: 3 x 12 x 1 = 36 passes per run, 648 in
+# total. A run writes into <output_folder>/<name>, and name defaults to its models joined
+# by "-", which is where these folder names come from.
+
+img_source: data/images
+gt_dir: data/labels_obb_gt
+output_folder: data/benchmark_results
+
+defaults:
+  imgsz: [640, 960, 1280]
+  scale_factors: [-0.01, 0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]
+  opening_kernels: [0.15]
+  iou_threshold: 0.1
+
+runs:
+  # Single models, cheapest to heaviest. The SAM2 sizes are swept in both releases, so the
+  # curve reads as a size sweep rather than as a mix of sizes and versions.
+  - sam_models: [mobile_sam]
+  - sam_models: [sam2_t]
+  - sam_models: [sam2.1_t]
+  - sam_models: [sam2_s]
+  - sam_models: [sam2.1_s]
+  - sam_models: [sam2_b]
+  - sam_models: [sam2.1_b]
+  - sam_models: [sam_b]
+  - sam_models: [sam_l]
+
+  # Ensembles, as three ladders of three. Masks are aggregated by majority vote, so an
+  # even-sized ensemble is stricter than the next larger odd one: a pair is the strict
+  # extreme, an intersection, since both models must claim a pixel for it to survive.
+  #
+  # Every ladder grows 2 -> 3 -> 4 by adding the next weaker model, so reading across a
+  # ladder isolates ensemble size, and reading down the three at one size isolates member
+  # quality. Picking ensembles ad hoc conflates the two and answers neither question.
+
+  # Strong: the best checkpoints available
+  - sam_models: [sam_l, sam_b]
+  - sam_models: [sam_l, sam_b, sam2.1_b]
+  - sam_models: [sam_l, sam_b, sam2_b, sam2.1_b]
+
+  # Mixed: one large model carrying progressively weaker company
+  - sam_models: [sam_l, sam2.1_t]
+  - sam_models: [sam_l, sam2.1_t, sam2_t]
+  - sam_models: [sam_l, sam2.1_t, sam2_t, mobile_sam]
+
+  # Light: no SAM1 at all, the base checkpoints first and then the tiny ones
+  - sam_models: [sam2_b, sam2.1_b]
+  - sam_models: [sam2_b, sam2.1_b, sam2.1_t]
+  - sam_models: [sam2_b, sam2.1_b, sam2.1_t, sam2_t]

@@ -1,0 +1,187 @@
+HBB2OBB benchmark provenance
+==============================================================================
+
+Written        : 2026-08-31 14:16:02 UTC
+hbb2obb        : 1.5.0
+source sha256  : 613201f1932f9c5b25ecf9673b31df045c580f383d673b7a46f82df757253d4b  (13 files)
+installed from : source checkout at /Users/rfonod/code/hbb2obb
+git commit     : 8096aa2301e2784ad01d54117442169570e10575
+git describe   : v1.4.0-16-g8096aa2
+source state   : matches that commit, which can be checked out directly
+
+Command that reproduces this benchmark
+------------------------------------------------------------------------------
+hbb2obb-optimize -c data/benchmark.yaml
+
+A copy of the configuration is written beside these results, so this folder
+re-runs on its own even when the repository is not at hand:
+    hbb2obb-optimize -c data/benchmark_results/benchmark.yaml
+Paths inside it resolve against the working directory; adjust them if the folder
+has moved.
+
+Sweep
+------------------------------------------------------------------------------
+Runs                     : 18
+Grid per run             : 3 image size(s) x 12 scale factor(s) x 1 opening kernel(s) = 36 points
+Total wall time          : 2.92 h (10494 s)
+
+  mobile_sam                                   mobile_sam
+  sam2_t                                       sam2_t
+  sam2.1_t                                     sam2.1_t
+  sam2_s                                       sam2_s
+  sam2.1_s                                     sam2.1_s
+  sam2_b                                       sam2_b
+  sam2.1_b                                     sam2.1_b
+  sam_b                                        sam_b
+  sam_l                                        sam_l
+  sam_l-sam_b                                  sam_l sam_b
+  sam_l-sam_b-sam2.1_b                         sam_l sam_b sam2.1_b
+  sam_l-sam_b-sam2_b-sam2.1_b                  sam_l sam_b sam2_b sam2.1_b
+  sam_l-sam2.1_t                               sam_l sam2.1_t
+  sam_l-sam2.1_t-sam2_t                        sam_l sam2.1_t sam2_t
+  sam_l-sam2.1_t-sam2_t-mobile_sam             sam_l sam2.1_t sam2_t mobile_sam
+  sam2_b-sam2.1_b                              sam2_b sam2.1_b
+  sam2_b-sam2.1_b-sam2.1_t                     sam2_b sam2.1_b sam2.1_t
+  sam2_b-sam2.1_b-sam2.1_t-sam2_t              sam2_b sam2.1_b sam2.1_t sam2_t
+
+Inputs
+------------------------------------------------------------------------------
+images         : data/images
+image count    : 3
+HBB labels     : data/labels_hbb
+HBB sha256     : 90611ed4cf0b8e4b5ad0819547c21ba8240189a77e254bf5da02750d0d94807d  (3 files)
+GT labels      : data/labels_obb_gt
+GT sha256      : 0a9990ede40cef373293adda59dbcaa3a58c6ca2494b0718d492b212c93e1a98  (3 files)
+
+SAM checkpoints used across all runs
+------------------------------------------------------------------------------
+mobile_sam
+    path   : models/mobile_sam.pt
+    size   : 40728226 bytes
+    sha256 : 6dbb90523a35330fedd7f1d3dfc66f995213d81b29a5ca8108dbcdd4e37d6c2f
+sam2_t
+    path   : models/sam2_t.pt
+    size   : 78064050 bytes
+    sha256 : 94375f988270836169320bd901960c67b5770e8bef3867d70102f01a8b5ca501
+sam2.1_t
+    path   : models/sam2.1_t.pt
+    size   : 78105722 bytes
+    sha256 : 3c1e81ca9b037dd39d70a014ddb9a813d6c4c4e12555420db7eaff31689bd4e3
+sam2_s
+    path   : models/sam2_s.pt
+    size   : 92278178 bytes
+    sha256 : 6ba91d739a6adfc1dcaf76336b2f380f3eae8d24a88f56c62798907f7fd62dad
+sam2.1_s
+    path   : models/sam2.1_s.pt
+    size   : 92319866 bytes
+    sha256 : 60f9e43f1307be192eef341437e02c40f32cd61cf36a97a203a0998a2952873a
+sam2_b
+    path   : models/sam2_b.pt
+    size   : 161894082 bytes
+    sha256 : 39722bb0ce2a086058cf64e50dffd6f9e9931b5fcbee79e33b30441c6c40264d
+sam2.1_b
+    path   : models/sam2.1_b.pt
+    size   : 161935802 bytes
+    sha256 : f1a9cf2dd69d84bb463b5ad98246d03e2d47a130a9295db0ec967e6cd95e2e47
+sam_b
+    path   : models/sam_b.pt
+    size   : 375042383 bytes
+    sha256 : ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912
+sam_l
+    path   : models/sam_l.pt
+    size   : 1249524607 bytes
+    sha256 : 3adcc4315b642a4d2101128f611684e8734c41232a17c648ed1693702a49a622
+
+Environment
+------------------------------------------------------------------------------
+python         : 3.11.15
+platform       : macOS-26.6.2-arm64-arm-64bit
+machine        : arm64
+ultralytics    : 8.4.124
+torch          : 2.13.0
+torchvision    : 0.28.0
+opencv-python  : 5.0.0.93
+numpy          : 2.4.6
+shapely        : 2.1.2
+matplotlib     : 3.11.1
+PyYAML         : 6.0.3
+
+Benchmark configuration, verbatim
+------------------------------------------------------------------------------
+# The benchmark shipped in data/benchmark_results. Reproduce all of it with:
+#
+#   hbb2obb-optimize -c data/benchmark.yaml --dry_run   # what it will do, and what it will cost
+#   hbb2obb-optimize -c data/benchmark.yaml             # about three hours on a laptop CPU
+#   hbb2obb-optimize -c data/benchmark.yaml --refresh   # only redraw the plots and summary.md
+#
+# Run it from the repository root: paths here resolve against the working directory, and so
+# does the models/ directory the SAM checkpoints are read from.
+#
+# Each run sweeps the full product of the three axes below, and every grid point is a complete
+# SAM pass over every image, so the cost multiplies: 3 x 12 x 1 = 36 passes per run, 648 in
+# total. A run writes into <output_folder>/<name>, and name defaults to its models joined
+# by "-", which is where these folder names come from.
+
+img_source: data/images
+gt_dir: data/labels_obb_gt
+output_folder: data/benchmark_results
+
+defaults:
+  imgsz: [640, 960, 1280]
+  scale_factors: [-0.01, 0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]
+  opening_kernels: [0.15]
+  iou_threshold: 0.1
+
+runs:
+  # Single models, cheapest to heaviest. The SAM2 sizes are swept in both releases, so the
+  # curve reads as a size sweep rather than as a mix of sizes and versions.
+  - sam_models: [mobile_sam]
+  - sam_models: [sam2_t]
+  - sam_models: [sam2.1_t]
+  - sam_models: [sam2_s]
+  - sam_models: [sam2.1_s]
+  - sam_models: [sam2_b]
+  - sam_models: [sam2.1_b]
+  - sam_models: [sam_b]
+  - sam_models: [sam_l]
+
+  # Ensembles, as three ladders of three. Masks are aggregated by majority vote, so an
+  # even-sized ensemble is stricter than the next larger odd one: a pair is the strict
+  # extreme, an intersection, since both models must claim a pixel for it to survive.
+  #
+  # Every ladder grows 2 -> 3 -> 4 by adding the next weaker model, so reading across a
+  # ladder isolates ensemble size, and reading down the three at one size isolates member
+  # quality. Picking ensembles ad hoc conflates the two and answers neither question.
+
+  # Strong: the best checkpoints available
+  - sam_models: [sam_l, sam_b]
+  - sam_models: [sam_l, sam_b, sam2.1_b]
+  - sam_models: [sam_l, sam_b, sam2_b, sam2.1_b]
+
+  # Mixed: one large model carrying progressively weaker company
+  - sam_models: [sam_l, sam2.1_t]
+  - sam_models: [sam_l, sam2.1_t, sam2_t]
+  - sam_models: [sam_l, sam2.1_t, sam2_t, mobile_sam]
+
+  # Light: no SAM1 at all, the base checkpoints first and then the tiny ones
+  - sam_models: [sam2_b, sam2.1_b]
+  - sam_models: [sam2_b, sam2.1_b, sam2.1_t]
+  - sam_models: [sam2_b, sam2.1_b, sam2.1_t, sam2_t]
+
+Reproducibility
+------------------------------------------------------------------------------
+Code. Install the version this ran from with
+    pip install hbb2obb==1.5.0
+and compare its source sha256 with the one above. That digest is computed from the
+package source, so it still matches after a branch has been squashed, rebased or
+deleted, which a commit hash does not; use the commit to find the change, the digest
+to prove you have the same code.
+
+Checkpoints. Verify each one against the SHA-256 above before concluding that a
+mismatch is a bug in the conversion: ultralytics downloads by name, and the file
+behind a name can change between asset releases.
+
+Determinism. The conversion is deterministic given the same images, the same HBB
+inputs, the same checkpoints and the same library versions. SAM inference is not
+bit-reproducible across torch builds and hardware, so expect a box or two to move by
+a pixel on a different machine.
