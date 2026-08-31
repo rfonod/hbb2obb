@@ -1,6 +1,6 @@
 # HBB2OBB: Horizontal to Oriented Bounding Box Conversion and Evaluation Tool
 
-[![GitHub Release](https://img.shields.io/github/v/release/rfonod/hbb2obb?include_prereleases)](https://github.com/rfonod/hbb2obb/releases) [![PyPI Version](https://img.shields.io/pypi/v/hbb2obb)](https://pypi.org/project/hbb2obb/) [![PyPi - Total Downloads](https://img.shields.io/pepy/dt/hbb2obb?label=total%20downloads)](https://pepy.tech/project/hbb2obb) [![PyPI - Downloads per Month](https://img.shields.io/pypi/dm/hbb2obb?color=%234c1)](https://pypi.org/project/hbb2obb/) [![CI](https://img.shields.io/github/actions/workflow/status/rfonod/hbb2obb/ci.yml?branch=main&label=CI)](https://github.com/rfonod/hbb2obb/actions/workflows/ci.yml) [![Python](https://img.shields.io/badge/python-3.9--3.13-blue)](https://www.python.org/) [![License](https://img.shields.io/github/license/rfonod/hbb2obb)](https://github.com/rfonod/hbb2obb/blob/main/LICENSE) [![GitHub Issues](https://img.shields.io/github/issues/rfonod/hbb2obb)](https://github.com/rfonod/hbb2obb/issues) [![DOI](https://zenodo.org/badge/960660341.svg)](https://doi.org/10.5281/zenodo.15151143) [![Development Status](https://img.shields.io/badge/development-active-brightgreen)](https://github.com/rfonod/hbb2obb)
+[![GitHub Release](https://img.shields.io/github/v/release/rfonod/hbb2obb?include_prereleases)](https://github.com/rfonod/hbb2obb/releases) [![PyPI Version](https://img.shields.io/pypi/v/hbb2obb)](https://pypi.org/project/hbb2obb/) [![PyPi - Total Downloads](https://img.shields.io/pepy/dt/hbb2obb?label=total%20downloads)](https://pepy.tech/project/hbb2obb) [![CI](https://img.shields.io/github/actions/workflow/status/rfonod/hbb2obb/ci.yml?branch=main&label=CI)](https://github.com/rfonod/hbb2obb/actions/workflows/ci.yml) [![Python](https://img.shields.io/badge/python-3.9--3.13-blue)](https://www.python.org/) [![License](https://img.shields.io/github/license/rfonod/hbb2obb)](https://github.com/rfonod/hbb2obb/blob/main/LICENSE) [![GitHub Issues](https://img.shields.io/github/issues/rfonod/hbb2obb)](https://github.com/rfonod/hbb2obb/issues) [![DOI](https://zenodo.org/badge/960660341.svg)](https://doi.org/10.5281/zenodo.15151143) [![Development Status](https://img.shields.io/badge/development-active-brightgreen)](https://github.com/rfonod/hbb2obb)
 
 **HBB2OBB** converts horizontal (axis-aligned) bounding boxes (HBBs) into oriented (rotated) bounding boxes (OBBs) by using your existing HBB annotations as prompts for segmentation models from the [SAM (Segment Anything Model) family](https://docs.ultralytics.com/models/sam/). It targets object detection tasks where objects appear at arbitrary orientations, such as aerial imagery, satellite data, or traffic monitoring, producing OBBs that tightly encapsulate non-upright objects. Beyond conversion, it ships evaluation, hyperparameter optimization, and annotation format-conversion tools, with both a command-line interface and a Python API.
 
@@ -341,6 +341,9 @@ hbb2obb-view data/images -o /path/to/annotated
 
 ![The hbb2obb annotation viewer](https://raw.githubusercontent.com/rfonod/hbb2obb/main/assets/hbb2obb_viewer.jpg)
 
+<details>
+<summary><b>Color legend and keyboard shortcuts</b></summary>
+
 Green is the OBB, white its source HBB, red the segmentation polygon it was fitted to, orange a box flagged `difficult`; with `--show_confidence` the OBB is tinted green→red by score, the same gradient `--save_img` uses. The last two need the conversion to have been run with `--save_polygon` and `--save_confidence`, which is how the sample data in `data/` was produced (see [`data/README.md`](data/README.md) for the exact commands behind every file there).
 
 | Key | | Key | |
@@ -353,6 +356,8 @@ Green is the OBB, white its source HBB, red the segmentation polygon it was fitt
 | `s` | save the current view | `x` | cycle the comparison overlay |
 
 Drag with the left mouse button to pan. `--crops` writes a contact sheet of the individual objects instead, which is the faster way to review a whole frame box by box.
+
+</details>
 
 ## Converting Between Formats
 
@@ -377,31 +382,50 @@ hbb2obb-convert /path/to/instances.json --from coco --to yolo -o /path/to/labels
 hbb2obb-convert /path/to/dataset --verify -mp label_map.yaml
 ```
 
+<details>
+<summary><b>Format details and edge cases</b></summary>
+
 `--verify` compares the formats by exact equality after rounding rather than by a tolerance, because they are all one common rounding of a single canonical source. That is the property worth testing: rounding full precision and rounding an already-rounded canonical disagree wherever a coordinate lands on a half pixel, and an envelope then silently stops matching the box it was derived from.
 
 Only DOTA and Pascal VOC can express a per-box `difficult` flag, so writing either one from YOLO or COCO resets it; `--difficult_from dota` carries the flags across. Only YOLO and COCO can carry a confidence, so DOTA and Pascal VOC drop it. Image dimensions come from `--images`, or from `--img_width` / `--img_height`, and are needed to denormalize relative YOLO coordinates. LabelMe stores class names rather than ids, so pass `-mp` when round-tripping through it to pin the ids.
 
 A COCO file is named `coco_annotations_<kind>.json` unless `--coco_name` says otherwise, which is also how `--verify` pairs one with its directory: `labels_<name>/` goes with `coco_annotations_<name>.json` beside it. Where a directory holds the canonical YOLO files next to derived ones, `--from` is detected as `yolo`, so a second pass through the converter never rounds an already rounded file.
 
+</details>
+
 ## Tuning Hyperparameters
 
 `hbb2obb-optimize` grid-searches inference resolution x scale factor x opening kernel for a set of SAM models, scoring each point by average IoU against ground-truth OBBs:
 
 ```bash
-# One sweep: the three axes for one model ensemble
 hbb2obb-optimize /path/to/images /path/to/ground_truth -sm sam_b sam_l sam2_b sam2.1_b -n multi_sam
+```
 
+<details>
+<summary><b>Grid size, outputs, and sweeping the opening kernel</b></summary>
+
+The grid is the full product of `--imgsz` x `--scale_factors` x `--opening_kernels`, and each grid point is a complete SAM pass over the whole image set, so the cost multiplies quickly: the defaults (3 image sizes, 12 scale factors, 1 opening kernel) already amount to 36 passes, and sweeping three kernels instead of one triples that to 108. `--opening_kernels` / `-ok` defaults to the single value `0.15`, so omitting it leaves the two-axis sweep and its grid size unchanged.
+
+```bash
 # Add the opening kernel as a third axis (2 x 3 x 3 = 18 grid points)
 hbb2obb-optimize /path/to/images /path/to/ground_truth -iz 960 1280 -sf 0.03 0.05 0.07 -ok 0.0 0.15 0.3
 ```
 
-The grid is the full product of `--imgsz` x `--scale_factors` x `--opening_kernels`, and each grid point is a complete SAM pass over the whole image set, so the cost multiplies quickly: the defaults (3 image sizes, 12 scale factors, 1 opening kernel) already amount to 36 passes, and sweeping three kernels instead of one triples that to 108. `--opening_kernels` / `-ok` defaults to the single value `0.15`, so omitting it leaves the two-axis sweep and its grid size unchanged.
-
 A run writes `run_config.yaml`, `results.yaml`, `summary.txt` and `plot.png` into `<output_folder>/<name>`, and `summary.md`, `comparison.png` and `PROVENANCE.txt` into the output folder itself. The plot colours each series by image size and, when more than one opening kernel was swept, distinguishes the kernels by marker shape.
 
-### Comparing several sweeps
+</details>
+
+### Comparing Several Sweeps
 
 Comparing model ensembles means running the same grid many times, which is a job for a file rather than for shell history. A YAML lists the runs, and one command produces all of them:
+
+```bash
+hbb2obb-optimize -c benchmark.yaml             # all runs in benchmark.yaml
+hbb2obb-optimize -c benchmark.yaml --resume    # continue one that was interrupted
+```
+
+<details>
+<summary><b>Config file, dry runs, and refreshing plots</b></summary>
 
 ```yaml
 # benchmark.yaml
@@ -421,8 +445,6 @@ runs:
 
 ```bash
 hbb2obb-optimize -c benchmark.yaml --dry_run   # the runs, the grid size, the total cost
-hbb2obb-optimize -c benchmark.yaml             # all of them
-hbb2obb-optimize -c benchmark.yaml --resume    # continue one that was interrupted
 hbb2obb-optimize -c benchmark.yaml --refresh   # only redraw the plots and the summary
 ```
 
@@ -430,18 +452,29 @@ Each run takes the `defaults` and overrides whatever it names; a run with no `na
 
 [`data/benchmark.yaml`](data/benchmark.yaml) is a working example: it is the file behind [`data/benchmark_results/`](data/benchmark_results/), so that whole folder is one command away.
 
+</details>
+
 ### Recording Provenance
 
 `--save_provenance` writes a `PROVENANCE.txt` beside the annotations, so a release can be regenerated rather than taken on trust:
 
 ```bash
-hbb2obb-detect /path/to/images --save_provenance
 hbb2obb /path/to/images --sam_models sam_l sam_b sam2_b sam2.1_b --save_confidence --save_provenance
+```
+
+<details>
+<summary><b>What gets recorded, and why a commit hash is not enough</b></summary>
+
+```bash
+# Works the same for detection
+hbb2obb-detect /path/to/images --save_provenance
 ```
 
 It records the exact command, the versions of `ultralytics`, `torch`, OpenCV, NumPy, Shapely and matplotlib, and the **SHA-256 of every checkpoint used**. That last part is the one worth insisting on: `ultralytics` resolves a bare model name by downloading it, and the file behind a name can change between asset releases, so the name alone does not pin the model that actually ran. The settings come from the run that happened rather than from arguments repeated afterwards, and a benchmark additionally hashes the label sets its numbers were measured against.
 
 The code is pinned three ways, because a commit hash alone is not enough: the release (`pip install hbb2obb==<version>`), the commit with `git describe` when there is a checkout, and a **SHA-256 over the package source**. The record says outright whether that commit can be checked out to get the code that ran, and it decides that by comparing the package directory alone, so a sweep writing its results back into the repository does not mark its own record as untrustworthy. The digest is the durable one. A commit hash identifies a point in a history, and history is editable: squash a branch, rebase it, or delete it after the merge, and the hash stops resolving, while an uncommitted tree never had one to record. The source digest is computed from the bytes that ran, so it still matches years later. Use the commit to find the change; use the digest to prove you have the same code.
+
+</details>
 
 ## Data Format
 
