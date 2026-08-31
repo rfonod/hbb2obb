@@ -214,7 +214,11 @@ def read_dota(path: Path, names: Sequence[str]) -> List[Box]:
 
 def read_voc(path: Path, names: Sequence[str]) -> Tuple[List[Box], int, int]:
     """Read a Pascal VOC XML file. Returns the boxes plus the image size it declares."""
-    root = ET.parse(path).getroot()
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as e:
+        print(f"Warning: skipping malformed VOC file {path}: {e}")
+        return [], 0, 0
     size = root.find("size")
     width = int(float(size.findtext("width", "0"))) if size is not None else 0
     height = int(float(size.findtext("height", "0"))) if size is not None else 0
@@ -268,7 +272,10 @@ def read_coco(path: Path, names: Optional[Sequence[str]] = None) -> Tuple[List[F
         if seg and isinstance(seg, list) and len(seg[0]) == 8:
             quad = np.array(seg[0], dtype=float).reshape(4, 2)
         else:
-            x, y, w, h = (float(v) for v in ann["bbox"][:4])
+            bbox = ann.get("bbox")
+            if not bbox or len(bbox) < 4:
+                continue
+            x, y, w, h = (float(v) for v in bbox[:4])
             quad = rect(x, y, x + w, y + h)
         score = ann.get("score")
         frame.boxes.append(Box(cls, quad, float(score) if score is not None else None))
@@ -581,7 +588,10 @@ def image_size(path: Path) -> Optional[Tuple[int, int]]:
             if head[:8] == b"\x89PNG\r\n\x1a\n":
                 return (int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big"))
             if head[:2] == b"BM":
-                return (int.from_bytes(head[18:22], "little"), int.from_bytes(head[22:26], "little"))
+                # biHeight is negative for a top-down bitmap; the pixel height is its magnitude.
+                width = int.from_bytes(head[18:22], "little", signed=True)
+                height = int.from_bytes(head[22:26], "little", signed=True)
+                return (abs(width), abs(height))
             if head[:2] == b"\xff\xd8":  # JPEG: walk the segments to the frame header
                 f.seek(2)
                 while True:
