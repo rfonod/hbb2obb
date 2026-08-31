@@ -1207,7 +1207,10 @@ def main_hbb2obb_optimize():
         hbb_dir,
         gt_dir,
         command,
-        elapsed_seconds=None if args.refresh else elapsed,
+        # None whenever this invocation measured nothing itself: a --refresh, or a --resume that
+        # found every run already complete. write_summary then falls back to summing each run's
+        # own recorded sweep_seconds instead of reporting this invocation's near-zero wall time.
+        elapsed_seconds=elapsed if swept else None,
         plot=plot,
         provenance=wrote_provenance or (output_folder / optimizer.BENCHMARK_PROVENANCE_NAME).is_file(),
         config_name=config_copy.name if config_copy else None,
