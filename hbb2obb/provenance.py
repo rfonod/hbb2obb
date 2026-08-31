@@ -139,7 +139,9 @@ def git_state(repo: Optional[Path] = None, package_root: Path = PACKAGE_ROOT) ->
         return {"commit": None, "describe": None, "dirty": None}
     status = git("status", "--porcelain", "--", str(package_root))
     dirty = None if status is None else len([line for line in status.splitlines() if line.strip()])
-    return {"commit": commit, "describe": git("describe", "--tags", "--always", "--dirty"), "dirty": dirty}
+    # No --dirty here: that flag is repository-wide and would contradict the package-scoped
+    # answer above every time a sweep wrote its results back into the repository.
+    return {"commit": commit, "describe": git("describe", "--tags", "--always"), "dirty": dirty}
 
 
 def resolve_model(name: str, models_dir: Path) -> Path:
