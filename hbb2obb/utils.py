@@ -144,7 +144,12 @@ def get_hbb_dir(img_path: Path, hbb_dir: Path = None) -> Path:
         else:
             hbb_dir = img_path.parent.parent / "labels_hbb"
     if not hbb_dir.is_dir():
-        print(f"Error: HBB directory not found: {hbb_dir}")
+        print(
+            f"\nError: no HBB directory at {hbb_dir.resolve()}\n"
+            "hbb2obb converts horizontal boxes you already have into oriented ones; it needs a "
+            "YOLO-format .txt per image in that directory before it can run.\n"
+            "No HBBs yet? Generate them first, e.g. with the detector hbb2obb ships: hbb2obb-detect --help"
+        )
         sys.exit(1)
     return hbb_dir
 
