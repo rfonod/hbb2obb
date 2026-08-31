@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import yaml  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
+from matplotlib.ticker import FixedLocator, NullLocator, ScalarFormatter  # noqa: E402
 
 COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 MARKERS = ['s', '^', 'o', 'D', 'P', '*', 'X']
@@ -327,6 +328,17 @@ def run_plot(benchmark_dir: Path, output: Optional[Path] = None, dpi: int = 300,
     return output
 
 
+def use_log_scale(times: Sequence[float]) -> bool:
+    """
+    Whether the cost axis should be logarithmic.
+
+    A benchmark that sweeps single models against ensembles spans close to an order of
+    magnitude, and on a linear axis the cheap half collapses into the leftmost tenth of the
+    plot. Below a four-fold spread the linear axis reads better and stays.
+    """
+    return bool(times) and min(times) > 0 and max(times) / min(times) >= 4
+
+
 def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300) -> Path:
     """
     Render one point per run: its best average IoU against what that grid point cost.
@@ -335,7 +347,9 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300) -> Path:
     can only say which scale factor won inside one ensemble; only this one says whether the
     extra models were worth their time.
     """
-    plt.figure(figsize=(8, 5.5))
+    # Wider than the per-run plots: a run is labelled by every model in it, so a five-model
+    # ensemble carries a forty-character name that needs somewhere to go.
+    plt.figure(figsize=(11, 6.2))
 
     times = [r['execution_time'] for r in rows]
     ious = [r['avg_iou'] for r in rows]
@@ -344,21 +358,45 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300) -> Path:
 
     plt.scatter(times, ious, s=sizes, c=colors, alpha=0.75, edgecolors='black', linewidths=0.6, zorder=3)
 
-    # Room for the labels, which are long: a five-model run is named by all five models.
-    x_span = (max(times) - min(times)) or 1.0
+    # A benchmark of ensembles spans an order of magnitude in cost: the single small models all
+    # land within a second or two of each other while a five-model run takes ten times as long.
+    # On a linear axis that packs half the runs into the leftmost tenth of the plot, so the axis
+    # goes logarithmic once the spread is wide enough to warrant it.
+    log_x = use_log_scale(times)
     y_span = (max(ious) - min(ious)) or 1.0
-    plt.xlim(min(times) - 0.10 * x_span, max(times) + 0.14 * x_span)
+    # Room for the labels, which are long: a five-model run is named by all five models.
+    if log_x:
+        plt.xscale('log')
+        x_lo, x_hi = min(times) / 1.25, max(times) * 1.18
+        # Decade ticks alone would label almost nothing over a single decade, and the default
+        # minor labels collide with them. A fixed ladder of round numbers reads as seconds.
+        ladder = [1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 70, 100, 150, 200, 300, 500, 700, 1000]
+        axis = plt.gca().xaxis
+        axis.set_major_locator(FixedLocator([t for t in ladder if x_lo <= t <= x_hi]))
+        axis.set_minor_locator(NullLocator())
+        axis.set_major_formatter(ScalarFormatter())
+    else:
+        x_span = (max(times) - min(times)) or 1.0
+        x_lo, x_hi = min(times) - 0.10 * x_span, max(times) + 0.14 * x_span
+    plt.xlim(x_lo, x_hi)
     plt.ylim(min(ious) - 0.16 * y_span, max(ious) + 0.10 * y_span)
+
+    def unit_x(value: float) -> float:
+        """Position along the axis in 0-1, so collisions are judged as the reader sees them."""
+        if log_x:
+            return (np.log10(value) - np.log10(x_lo)) / (np.log10(x_hi) - np.log10(x_lo))
+        return (value - x_lo) / (x_hi - x_lo)
 
     # Label each point on the side that has room, and step a label down when it would land on
     # one already placed. Two ensembles of similar cost and similar accuracy are exactly the
     # comparison this plot exists to make, so their labels must not overprint each other.
-    midpoint = (min(times) + max(times)) / 2
+    midpoint = 10 ** ((np.log10(x_lo) + np.log10(x_hi)) / 2) if log_x else (min(times) + max(times)) / 2
     placed = []
     for row, x, y in sorted(zip(rows, times, ious), key=lambda r: -r[2]):
         offset_y = 5.0
         while any(
-            abs(x - px) < 0.16 * x_span and abs(y + offset_y * y_span / 300 - py) < 0.035 * y_span for px, py in placed
+            abs(unit_x(x) - unit_x(px)) < 0.20 and abs(y + offset_y * y_span / 300 - py) < 0.035 * y_span
+            for px, py in placed
         ):
             offset_y -= 11.0
         placed.append((x, y + offset_y * y_span / 300))
