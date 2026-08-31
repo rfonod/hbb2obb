@@ -73,6 +73,8 @@ def image_paths(img_source: Path) -> List[Path]:
     """Every image under a directory, or the single image given."""
     if img_source.is_file():
         return [img_source]
+    if not img_source.is_dir():
+        return []
     return sorted(p for p in img_source.iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS)
 
 
