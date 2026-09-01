@@ -29,13 +29,29 @@ SUPPORTED_SAM_MODELS = [
     "FastSAM-x",
 ]
 
+# Shown at the end of `hbb2obb --help` so a new user discovers the rest of the toolkit.
+ENTRY_POINTS_EPILOG = (
+    "The hbb2obb toolkit ships six commands:\n"
+    "  hbb2obb           convert HBB annotations to OBBs by prompting SAM (this command)\n"
+    "  hbb2obb-detect    detect HBBs with an Ultralytics model, for images that have none\n"
+    "  hbb2obb-convert   convert annotations between YOLO, DOTA, Pascal VOC, COCO and LabelMe\n"
+    "  hbb2obb-view      inspect HBB and OBB annotations over their images, interactively\n"
+    "  hbb2obb-eval      score predicted OBBs against ground truth (precision, recall, F1, IoU)\n"
+    "  hbb2obb-optimize  search hyperparameters, as one sweep or a whole benchmark\n\n"
+    "Run any of them with --help for its own options, e.g. hbb2obb-detect --help."
+)
+
 
 def main_hbb2obb():
     """
     Run the HBB to OBB conversion from command line.
     """
 
-    parser = argparse.ArgumentParser(description="Convert HBB to OBB annotations")
+    parser = argparse.ArgumentParser(
+        description="Convert HBB to OBB annotations",
+        epilog=ENTRY_POINTS_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
 
     # Main arguments
