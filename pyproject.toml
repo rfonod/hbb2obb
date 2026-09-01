@@ -61,6 +61,7 @@ dependencies = [
     "shapely>=2.0.7",
     "tqdm>=4.64.0",
     "pandas>=1.3.0",
+    "matplotlib>=3.3.0",
 ]
 
 [project.optional-dependencies]
@@ -71,7 +72,11 @@ dev = [
 
 [project.scripts]
 hbb2obb = "hbb2obb.cli:main_hbb2obb"
+hbb2obb-detect = "hbb2obb.cli:main_hbb2obb_detect"
 hbb2obb-eval = "hbb2obb.cli:main_hbb2obb_eval"
+hbb2obb-convert = "hbb2obb.cli:main_hbb2obb_convert"
+hbb2obb-view = "hbb2obb.cli:main_hbb2obb_view"
+hbb2obb-optimize = "hbb2obb.cli:main_hbb2obb_optimize"
 
 [tool.setuptools] 
 packages = { find = { where = ["."], include = ["hbb2obb", "hbb2obb.*"] } }

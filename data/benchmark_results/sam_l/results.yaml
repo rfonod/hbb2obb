@@ -1,409 +1,448 @@
 best_parameters:
   imgsz: 1280
-  scale_factor: 0.04
-  avg_iou: 0.9020291533441541
-  std_iou: 0.06672189080856335
-  total_matches: 201
+  scale_factor: 0.06
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8988755612563958
+  std_iou: 0.06770084117730701
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.507871150970459
+  execution_time: 25.822969913482666
 all_results:
 - imgsz: 640
   scale_factor: -0.01
-  avg_iou: 0.7983608700627464
-  std_iou: 0.0981244270462982
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.7845652159828215
+  std_iou: 0.10560528423395386
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 12.9129319190979
+  execution_time: 6.768527984619141
 - imgsz: 640
   scale_factor: 0.0
-  avg_iou: 0.8072483862083273
-  std_iou: 0.10473920830699464
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.7985214251121373
+  std_iou: 0.10935503656294598
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 12.914754867553711
+  execution_time: 6.712998151779175
 - imgsz: 640
   scale_factor: 0.01
-  avg_iou: 0.8088238807455767
-  std_iou: 0.10845204773195874
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8046873468339196
+  std_iou: 0.11022655471581665
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 12.903084516525269
+  execution_time: 6.746653079986572
 - imgsz: 640
   scale_factor: 0.02
-  avg_iou: 0.8091402838765216
-  std_iou: 0.1087080599913947
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8109592949545406
+  std_iou: 0.11014167731080718
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 12.82474684715271
+  execution_time: 6.788377285003662
 - imgsz: 640
   scale_factor: 0.03
-  avg_iou: 0.8049874141534598
-  std_iou: 0.10878371030848685
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8091780316852538
+  std_iou: 0.10915236227319038
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.020666360855103
+  execution_time: 6.817641973495483
 - imgsz: 640
   scale_factor: 0.04
-  avg_iou: 0.7995294101620481
-  std_iou: 0.10827746283336115
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8061375609962291
+  std_iou: 0.10633044593551476
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.027127027511597
+  execution_time: 6.866907835006714
 - imgsz: 640
   scale_factor: 0.05
-  avg_iou: 0.7892079572506093
-  std_iou: 0.10512073824657796
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.7987092340229589
+  std_iou: 0.10288812188519829
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 12.993361949920654
+  execution_time: 6.808167934417725
 - imgsz: 640
   scale_factor: 0.06
-  avg_iou: 0.7790928357366166
-  std_iou: 0.10144174812260816
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.789772457828828
+  std_iou: 0.09801022504002777
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.220018863677979
+  execution_time: 6.821023941040039
 - imgsz: 640
   scale_factor: 0.07
-  avg_iou: 0.7685467343203708
-  std_iou: 0.09837055963306592
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.7815842781769288
+  std_iou: 0.09472677913339228
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.00465703010559
+  execution_time: 6.8423449993133545
 - imgsz: 640
   scale_factor: 0.08
-  avg_iou: 0.7595050957235385
-  std_iou: 0.09372270248642879
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.7719655169471784
+  std_iou: 0.09025403697552202
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 15.032141923904419
+  execution_time: 6.806497097015381
 - imgsz: 640
   scale_factor: 0.09
-  avg_iou: 0.7501157583696163
-  std_iou: 0.09122797135912808
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.7627084857005542
+  std_iou: 0.08728296059046381
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.021333456039429
+  execution_time: 6.8315980434417725
 - imgsz: 640
   scale_factor: 0.1
-  avg_iou: 0.7399602456813946
-  std_iou: 0.08875605590976364
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.7532524321080732
+  std_iou: 0.08510062298887013
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 12.906722068786621
+  execution_time: 6.812597990036011
 - imgsz: 960
   scale_factor: -0.01
-  avg_iou: 0.8536447523612128
-  std_iou: 0.06950239613865153
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8355887661762152
+  std_iou: 0.07795996099185969
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 15.108646869659424
+  execution_time: 12.042721033096313
 - imgsz: 960
   scale_factor: 0.0
-  avg_iou: 0.8623313117222938
-  std_iou: 0.07112393892975535
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8508856305251719
+  std_iou: 0.07700485864743173
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.189633846282959
+  execution_time: 12.109710931777954
 - imgsz: 960
   scale_factor: 0.01
-  avg_iou: 0.8699388173344186
-  std_iou: 0.07414239985975664
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.862719522761576
+  std_iou: 0.07644824972295777
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 15.223155736923218
+  execution_time: 12.04401707649231
 - imgsz: 960
   scale_factor: 0.02
-  avg_iou: 0.8706484104882808
-  std_iou: 0.07601559256584116
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8669046353362512
+  std_iou: 0.07759803541955869
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.062142610549927
+  execution_time: 12.06350302696228
 - imgsz: 960
   scale_factor: 0.03
-  avg_iou: 0.8712751556834416
-  std_iou: 0.07717491210471526
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8690221991339748
+  std_iou: 0.07598606422956769
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.148301124572754
+  execution_time: 12.118587017059326
 - imgsz: 960
   scale_factor: 0.04
-  avg_iou: 0.8685095213051837
-  std_iou: 0.07861713399580537
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8697808805170899
+  std_iou: 0.07452994050145634
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.25764799118042
+  execution_time: 12.071191787719727
 - imgsz: 960
   scale_factor: 0.05
-  avg_iou: 0.8636148728338453
-  std_iou: 0.0790532935525357
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8658884534533448
+  std_iou: 0.07326987831493262
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 15.251211166381836
+  execution_time: 12.86779499053955
 - imgsz: 960
   scale_factor: 0.06
-  avg_iou: 0.856894358599965
-  std_iou: 0.07947652535535481
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8618910920003543
+  std_iou: 0.07240333897830324
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.259519100189209
+  execution_time: 12.199198961257935
 - imgsz: 960
   scale_factor: 0.07
-  avg_iou: 0.8509756556286043
-  std_iou: 0.07897032166050734
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8569605960416191
+  std_iou: 0.07351891137320433
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.279119968414307
+  execution_time: 12.11810302734375
 - imgsz: 960
   scale_factor: 0.08
-  avg_iou: 0.8448473778272413
-  std_iou: 0.07879200707352901
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8519571260481494
+  std_iou: 0.07350917187988458
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.277926921844482
+  execution_time: 12.16133713722229
 - imgsz: 960
   scale_factor: 0.09
-  avg_iou: 0.8386224023263237
-  std_iou: 0.07936694875254673
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8459205189201149
+  std_iou: 0.07301376943712783
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.166709423065186
+  execution_time: 12.210837125778198
 - imgsz: 960
   scale_factor: 0.1
-  avg_iou: 0.8341307942354008
-  std_iou: 0.07939702179697186
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8413078581641936
+  std_iou: 0.07486012719424237
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.143221616744995
+  execution_time: 12.383665084838867
 - imgsz: 1280
   scale_factor: -0.01
-  avg_iou: 0.8731292691089626
-  std_iou: 0.05795425929197976
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8584692729363644
+  std_iou: 0.05890362607324346
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.57947039604187
+  execution_time: 24.226794004440308
 - imgsz: 1280
   scale_factor: 0.0
-  avg_iou: 0.8843939249919964
-  std_iou: 0.05760377521926133
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.871306842915637
+  std_iou: 0.059330057213899064
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.649349689483643
+  execution_time: 25.57641315460205
 - imgsz: 1280
   scale_factor: 0.01
-  avg_iou: 0.8901094640654054
-  std_iou: 0.059014384527714674
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8831462821234567
+  std_iou: 0.05968525700499551
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.513439893722534
+  execution_time: 25.654133081436157
 - imgsz: 1280
   scale_factor: 0.02
-  avg_iou: 0.8963259812342735
-  std_iou: 0.06202485799681638
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8894104046101537
+  std_iou: 0.061095981208650015
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.659979343414307
+  execution_time: 23.982245206832886
 - imgsz: 1280
   scale_factor: 0.03
-  avg_iou: 0.8996113288247483
-  std_iou: 0.0646441054608454
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8954080318702189
+  std_iou: 0.06295645427709244
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.663350343704224
+  execution_time: 25.415394067764282
 - imgsz: 1280
   scale_factor: 0.04
-  avg_iou: 0.9020291533441541
-  std_iou: 0.06672189080856335
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8977615138869676
+  std_iou: 0.06368892673007247
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.507871150970459
+  execution_time: 24.041476011276245
 - imgsz: 1280
   scale_factor: 0.05
-  avg_iou: 0.9001733039308821
-  std_iou: 0.06884237099103108
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.897987316473081
+  std_iou: 0.06628566338078365
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.666959285736084
+  execution_time: 24.589924812316895
 - imgsz: 1280
   scale_factor: 0.06
-  avg_iou: 0.9016808440383819
-  std_iou: 0.06861823987856974
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8988755612563958
+  std_iou: 0.06770084117730701
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.654703378677368
+  execution_time: 25.822969913482666
 - imgsz: 1280
   scale_factor: 0.07
-  avg_iou: 0.8980537603949555
-  std_iou: 0.0699924991902332
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8984854667649396
+  std_iou: 0.06747240784760031
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.69873309135437
+  execution_time: 24.556113958358765
 - imgsz: 1280
   scale_factor: 0.08
-  avg_iou: 0.8966765679746008
-  std_iou: 0.07034826479866758
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8977042907470002
+  std_iou: 0.06894380666390136
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.744927883148193
+  execution_time: 24.18257784843445
 - imgsz: 1280
   scale_factor: 0.09
-  avg_iou: 0.8948198395464017
-  std_iou: 0.0720039056918428
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8967281001414372
+  std_iou: 0.07032829462174127
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.778093814849854
+  execution_time: 23.982703924179077
 - imgsz: 1280
   scale_factor: 0.1
-  avg_iou: 0.8916328219771563
-  std_iou: 0.07239563447412324
-  total_matches: 201
+  opening_kernel_percentage: 0.15
+  avg_iou: 0.8951473811830172
+  std_iou: 0.07228330493650444
+  total_matches: 200
   total_gt: 201
   total_pred: 201
   class_agnostic: false
   iou_threshold: 0.1
   excluded_classes: []
-  execution_time: 13.709558010101318
+  execution_time: 26.108248949050903
+model_load_seconds: 0.5835649967193604
+sweep_seconds: 530.1078567504883

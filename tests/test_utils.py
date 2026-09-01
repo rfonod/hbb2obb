@@ -193,6 +193,11 @@ class TestAnnotations:
         assert ann.hbb_scores[0] == pytest.approx(0.87)
         assert np.isnan(ann.hbb_scores[1])
 
+    def test_extra_trailing_fields_raise(self, tmp_path, img):
+        """A line with tokens past the optional confidence column is rejected, not silently truncated."""
+        with pytest.raises(ValueError):
+            _annotations(tmp_path, "0 100 50 40 20 0.87 garbage\n", img)
+
     def test_empty_file(self, tmp_path, img):
         """An empty label file (a frame with no objects) yields empty arrays, not an IndexError."""
         ann = _annotations(tmp_path, "", img)

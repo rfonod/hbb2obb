@@ -24,13 +24,20 @@ PYPI_URL = "https://pypi.org/pypi/hbb2obb/json"
 CACHE_TTL = 24 * 3600
 FETCH_TIMEOUT = 2.0
 ENV_OPT_OUT = "HBB2OBB_DISABLE_UPDATE_CHECK"
+_FALSY_ENV_VALUES = {"", "0", "false", "no", "off"}
 
 _state = {'checked': False}
 _lock = threading.Lock()
 
 
 def _opted_out() -> bool:
-    return bool(os.environ.get(ENV_OPT_OUT))
+    """
+    True unless HBB2OBB_DISABLE_UPDATE_CHECK is unset or one of the conventional falsy
+    strings ('0', 'false', 'no', 'off', case-insensitive) - so e.g. '=0' does not disable
+    the check, matching how boolean env vars are normally spelled.
+    """
+    value = os.environ.get(ENV_OPT_OUT)
+    return value is not None and value.strip().lower() not in _FALSY_ENV_VALUES
 
 
 def _cache_dir() -> Path:

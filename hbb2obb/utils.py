@@ -56,6 +56,15 @@ class Annotations:
         hbb_xyxy = []
         hbb_scores = []
         for line_parts in lines:
+            # class + 4 coords + an optional trailing confidence column; reject anything past that
+            # instead of silently discarding it (a former unconditional line_parts[1:] unpack would
+            # have raised on this).
+            if len(line_parts) > 6:
+                raise ValueError(
+                    f"Malformed HBB line in {self.hbb_filepath} (expected at most 6 fields, "
+                    f"got {len(line_parts)}): {' '.join(line_parts)}"
+                )
+
             label = int(line_parts[0])
             if self.input_format == "xywh":
                 xc, yc, w, h = map(float, line_parts[1:5])
@@ -135,7 +144,12 @@ def get_hbb_dir(img_path: Path, hbb_dir: Path = None) -> Path:
         else:
             hbb_dir = img_path.parent.parent / "labels_hbb"
     if not hbb_dir.is_dir():
-        print(f"Error: HBB directory not found: {hbb_dir}")
+        print(
+            f"\nError: no HBB directory at {hbb_dir.resolve()}\n"
+            "hbb2obb converts horizontal boxes you already have into oriented ones; it needs a "
+            "YOLO-format .txt per image in that directory before it can run.\n"
+            "No HBBs yet? Generate them first, e.g. with the detector hbb2obb ships: hbb2obb-detect --help"
+        )
         sys.exit(1)
     return hbb_dir
 
