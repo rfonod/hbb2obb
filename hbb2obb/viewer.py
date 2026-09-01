@@ -361,9 +361,10 @@ class Viewer:
             sx, sy, ox, oy = self.drag
             self.cx = ox - (x - sx) / self.zoom
             self.cy = oy - (y - sy) / self.zoom
-        else:
-            return
-        cv2.imshow(WINDOW, self.view())
+        # No redraw here: run()'s loop already calls cv2.imshow() every ~30ms regardless of
+        # mouse activity, so this only updates state. That keeps on_mouse callable without a
+        # live window, which is what lets it be unit-tested headlessly; calling cv2.imshow()
+        # from here crashed hard on a display-less Linux CI runner.
 
     def run(self) -> None:
         cv2.namedWindow(WINDOW, cv2.WINDOW_AUTOSIZE)
