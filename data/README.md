@@ -238,6 +238,6 @@ The `sam_b` run is the configuration `labels_obb/` was produced with, which is w
 
 ![Average IoU against scale factor for the sam_b run, one line per image size](benchmark_results/sam_b/plot.png)
 
-`sam_b/plot.png`, the per-run plot every sweep folder ships: average IoU against scale factor, coloured by image size, with marker area encoding execution time. The peak at 1280 px and scale factor 0.05 is the grid point named just above.
+`sam_b/plot.png`, the per-run plot every sweep folder ships: average IoU against scale factor, coloured by image size, with marker area encoding execution time. The peak at 1280 px and scale factor 0.05 is the grid point named just above. A sweep over several opening kernels shades each hue by kernel, so the kernels stay apart in the one plot; this sweep uses a single kernel, so the colours are the plain palette.
 
 > **These are illustrative numbers, not the benchmark.** They come from 201 boxes over 3 frames, which is far too small to select hyperparameters on, and those frames are Songdo Vision test images (see [Data Attribution](#data-attribution)). The real study runs against the 50-frame tuning set released with **Songdo Vision+**, which shares no image with Songdo Vision; its inputs and its output artifacts live there, alongside the configuration they were produced with.

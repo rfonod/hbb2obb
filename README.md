@@ -412,7 +412,7 @@ The grid is the full product of `--imgsz` x `--scale_factors` x `--opening_kerne
 hbb2obb-optimize /path/to/images /path/to/ground_truth -iz 960 1280 -sf 0.03 0.05 0.07 -ok 0.0 0.15 0.3
 ```
 
-A run writes `run_config.yaml`, `results.yaml`, `summary.txt` and `plot.png` into `<output_folder>/<name>`, and `summary.md`, `comparison.png` and `PROVENANCE.txt` into the output folder itself. The plot colours each series by image size and, when more than one opening kernel was swept, distinguishes the kernels by marker shape.
+A run writes `run_config.yaml`, `results.yaml`, `summary.txt` and `plot.png` into `<output_folder>/<name>`, and `summary.md`, `comparison.png` and `PROVENANCE.txt` into the output folder itself. The plot gives each series a hue by image size and, when more than one opening kernel was swept, a lightness of that hue and a marker shape by kernel, so no two of the swept combinations share a colour. Marker area is the execution time.
 
 `--device` (e.g. `cpu`, `0`, `cuda:0`, `mps`) applies to every run and overrides any `device` set in the config, so the same benchmark runs on whatever machine is free without editing the file.
 
