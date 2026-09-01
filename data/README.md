@@ -218,6 +218,10 @@ The `benchmark_results` directory holds the sweeps described in step 6, one subf
 
 **[`benchmark_results/summary.md`](benchmark_results/summary.md) is the generated write-up:** every run's best grid point in one table, sorted by IoU, with the winner named and `comparison.png` showing accuracy against compute. [`benchmark_results/PROVENANCE.txt`](benchmark_results/PROVENANCE.txt) records the checkpoint hashes, the hashes of the label sets the numbers were measured against, a digest of the hbb2obb source that ran, the library versions and the command. Both are written by the same command that produces the runs, so neither can drift from them, and `benchmark.yaml` is copied in beside them so the folder re-runs without this repository.
 
+![Best average IoU against execution time, one point per run, with a Pareto front](benchmark_results/comparison.png)
+
+`comparison.png`, shipped with this folder: each point is one model set at its best grid point, and the dashed line is the Pareto front (the runs no other run beats on both accuracy and time).
+
 The nine ensembles are arranged as **three ladders**, each growing from two models to four by adding the next weaker one, so that reading across a ladder varies ensemble size at roughly fixed member quality and reading down the three ladders at one size varies quality at fixed size. What they say, all of it worth taking as a hypothesis to test on your own data rather than as a finding:
 
 | Ladder | 2 models | 3 models | 4 models |
@@ -231,5 +235,9 @@ The nine ensembles are arranged as **three ladders**, each growing from two mode
 **The cheapest good configuration is a large model paired with a tiny one.** `sam_l sam2.1_t` reaches 0.9008 in 34 s, edging out `sam_l sam_b` (0.9005) in three quarters of the time, and both beat `sam_l` alone (0.8989). **1280 px wins all eighteen runs**, by a wide margin over 640 px. And **within SAM2 the small checkpoints buy nothing over the tiny ones:** `sam2_s` (0.8652) and `sam2.1_s` (0.8648) sit at or just below `sam2_t` (0.8665) and `sam2.1_t` (0.8689); only the base checkpoints pull ahead (0.8803 and 0.8829). The 2.1 release edges out its 2.0 counterpart at tiny and base, and ties at small.
 
 The `sam_b` run is the configuration `labels_obb/` was produced with, which is why its best IoU, 0.8964 ± 0.0683 at 1280 px and scale factor 0.05, is the number step 5 prints.
+
+![Average IoU against scale factor for the sam_b run, one line per image size](benchmark_results/sam_b/plot.png)
+
+`sam_b/plot.png`, the per-run plot every sweep folder ships: average IoU against scale factor, coloured by image size, with marker area encoding execution time. The peak at 1280 px and scale factor 0.05 is the grid point named just above.
 
 > **These are illustrative numbers, not the benchmark.** They come from 201 boxes over 3 frames, which is far too small to select hyperparameters on, and those frames are Songdo Vision test images (see [Data Attribution](#data-attribution)). The real study runs against the 50-frame tuning set released with **Songdo Vision+**, which shares no image with Songdo Vision; its inputs and its output artifacts live there, alongside the configuration they were produced with.
