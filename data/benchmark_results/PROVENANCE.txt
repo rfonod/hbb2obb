@@ -4,7 +4,6 @@ HBB2OBB benchmark provenance
 Written        : 2026-08-31 14:16:02 UTC
 hbb2obb        : 1.5.0
 source sha256  : 613201f1932f9c5b25ecf9673b31df045c580f383d673b7a46f82df757253d4b  (13 files)
-installed from : source checkout at /Users/rfonod/code/hbb2obb
 git commit     : 8096aa2301e2784ad01d54117442169570e10575
 git describe   : v1.4.0-16-g8096aa2
 source state   : matches that commit, which can be checked out directly

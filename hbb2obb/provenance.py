@@ -101,16 +101,6 @@ def source_digest(package_root: Path = PACKAGE_ROOT) -> str:
     return f"{h.hexdigest()}  ({len(files)} files)"
 
 
-def install_source(package_root: Path = PACKAGE_ROOT) -> str:
-    """Whether this ran from a working checkout or from an installed distribution."""
-    parent = package_root.parent
-    if (parent / ".git").exists():
-        return f"source checkout at {parent}"
-    if "site-packages" in package_root.parts:
-        return f"installed distribution at {package_root}"
-    return str(package_root)
-
-
 def git_state(repo: Optional[Path] = None, package_root: Path = PACKAGE_ROOT) -> dict:
     """
     Commit, ``git describe``, and whether the package source differs from that commit.
@@ -205,7 +195,6 @@ def header(title: str) -> List[str]:
         f"Written        : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
         f"hbb2obb        : {__version__}",
         f"source sha256  : {source_digest()}",
-        f"installed from : {install_source()}",
     ]
     git = git_state()
     if git["commit"] is None:
