@@ -63,6 +63,7 @@ def hbb2obb(
     show_labels: bool = True,
     show_confidence: bool = False,
     model_kwargs: Dict[str, Any] = None,
+    device: str = None,
     return_confidence: bool = False,
     confidence_source: str = "conversion",
     return_contours: bool = False,
@@ -88,6 +89,8 @@ def hbb2obb(
         show_labels: Show class labels
         show_confidence: Print the per-OBB confidence score in the visualization
         model_kwargs: Additional keyword arguments for the SAM model
+        device: Inference device, e.g. 'cpu', '0', 'cuda:0', 'mps' (default: ultralytics picks).
+                     An explicit 'device' in model_kwargs takes precedence.
         return_confidence: If True, also return the per-OBB confidence scores
         confidence_source: Which score the returned confidences carry: 'conversion' (the
                      heuristic conversion-quality score), 'detector' (the confidence read
@@ -124,6 +127,10 @@ def hbb2obb(
 
     if model_kwargs is None:
         model_kwargs = {}
+    if device is not None:
+        # A new dict, so a model_kwargs shared across a directory of images is never mutated;
+        # an explicit device in model_kwargs still wins.
+        model_kwargs = {"device": device, **model_kwargs}
     masks_all_models = []
 
     # Run each model and collect results

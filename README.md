@@ -185,6 +185,7 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--opening_kernel_percentage` / `-okp`: morphological opening kernel size as a percentage of the mask's smaller dimension.
 - `--save_confidence`: append a per-OBB [confidence score](#confidence-scores) as a 10th column in the output TXT files.
 - `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
+- `--device`: inference device for the SAM model(s), e.g. `cpu`, `0`, `cuda:0`, `mps` (default: Ultralytics picks).
 - `--model_kwargs` / `-k`: extra Ultralytics inference kwargs as `key1=value1,key2=value2`.
 
 Key evaluation arguments:
@@ -412,6 +413,8 @@ hbb2obb-optimize /path/to/images /path/to/ground_truth -iz 960 1280 -sf 0.03 0.0
 ```
 
 A run writes `run_config.yaml`, `results.yaml`, `summary.txt` and `plot.png` into `<output_folder>/<name>`, and `summary.md`, `comparison.png` and `PROVENANCE.txt` into the output folder itself. The plot colours each series by image size and, when more than one opening kernel was swept, distinguishes the kernels by marker shape.
+
+`--device` (e.g. `cpu`, `0`, `cuda:0`, `mps`) applies to every run and overrides any `device` set in the config, so the same benchmark runs on whatever machine is free without editing the file.
 
 </details>
 

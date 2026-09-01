@@ -618,5 +618,56 @@ class TestSavePolygonAnnotations(unittest.TestCase):
                 save_polygon_annotations(self.contours[:1], self.obb_annotations, Path(tmp), Path(tmp) / "sample.jpg")
 
 
+class TestDeviceForwarding(unittest.TestCase):
+    """`hbb2obb(device=...)` must reach the ultralytics inference call."""
+
+    class _FakeResult:
+        masks = None  # no mask -> the box falls back to its HBB, which is all this test needs
+
+    class _FakeModel:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, _img, **kwargs):
+            self.calls.append(kwargs)
+            return [TestDeviceForwarding._FakeResult()]
+
+    def setUp(self):
+        self.model = self._FakeModel()
+        self._orig_loader = converter.load_sam_model
+        converter.load_sam_model = lambda _name: self.model
+
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.img_path = root / "images" / "sample.jpg"
+        self.img_path.parent.mkdir()
+        cv2.imwrite(str(self.img_path), np.zeros((200, 200, 3), np.uint8))
+        self.hbb_dir = root / "labels_hbb"
+        self.hbb_dir.mkdir()
+        (self.hbb_dir / "sample.txt").write_text("0 100 100 40 40\n")
+
+    def tearDown(self):
+        converter.load_sam_model = self._orig_loader
+        self.tmp.cleanup()
+
+    def _run(self, **kwargs):
+        converter.hbb2obb(img_path=self.img_path, hbb_dir=self.hbb_dir, sam_models=["sam_b"], **kwargs)
+        return self.model.calls[0]
+
+    def test_device_is_passed_through(self):
+        self.assertEqual(self._run(device="cpu")["device"], "cpu")
+
+    def test_no_device_leaves_it_unset(self):
+        self.assertNotIn("device", self._run())
+
+    def test_explicit_model_kwargs_device_wins(self):
+        self.assertEqual(self._run(device="cpu", model_kwargs={"device": "0"})["device"], "0")
+
+    def test_a_shared_model_kwargs_dict_is_not_mutated(self):
+        shared = {}
+        self._run(device="cpu", model_kwargs=shared)
+        self.assertEqual(shared, {})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -174,6 +174,11 @@ def main_hbb2obb():
         help="Simplify saved polygons with an epsilon of this fraction of the contour perimeter (0 to disable)",
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        help="Inference device for the SAM model(s), e.g. 'cpu', '0', 'cuda:0', 'mps' (default: ultralytics picks)",
+    )
+    parser.add_argument(
         "--model_kwargs",
         "-k",
         type=str,
@@ -224,6 +229,7 @@ def main_hbb2obb():
             show_labels=args.show_labels,
             show_confidence=args.show_confidence,
             model_kwargs=model_kwargs,
+            device=args.device,
             return_confidence=args.save_confidence,
             confidence_source=args.confidence_source,
             return_contours=args.save_polygon,
@@ -255,6 +261,7 @@ def main_hbb2obb():
             opening_kernel_percentage=args.opening_kernel_percentage,
             confidence_source=args.confidence_source,
             model_kwargs=args.model_kwargs,
+            device=args.device,
         )
 
 
@@ -467,6 +474,7 @@ def main_hbb2obb_detect():
             classes=args.classes if args.classes is not None else spec.classes,
             merged_with=args.merge_with,
             model_kwargs=args.model_kwargs,
+            device=args.device,
         )
 
 
@@ -1028,6 +1036,14 @@ def main_hbb2obb_optimize():
     )
 
     parser.add_argument(
+        "--device",
+        type=str,
+        help=(
+            "Inference device for the SAM model(s), e.g. 'cpu', '0', 'cuda:0', 'mps'. Applies to "
+            "every run, overriding any 'device' set in the config (default: ultralytics picks)"
+        ),
+    )
+    parser.add_argument(
         "--model_kwargs",
         "-k",
         type=str,
@@ -1058,6 +1074,8 @@ def main_hbb2obb_optimize():
         )
         config_text = args.config.read_text(encoding="utf-8")
         command = f"hbb2obb-optimize -c {args.config}"
+        if args.device:
+            command += f" --device {args.device}"
     else:
         if args.img_source is None or args.gt_dir is None:
             parser.error("img_source and gt_dir are required unless --config is given")
@@ -1082,6 +1100,7 @@ def main_hbb2obb_optimize():
                 img_width=args.img_width,
                 img_height=args.img_height,
                 model_kwargs=args.model_kwargs,
+                device=args.device,
             )
         ]
         img_source = args.img_source
@@ -1106,7 +1125,14 @@ def main_hbb2obb_optimize():
                 "--run_name",
                 spec.name,
             ]
+            + (["--device", args.device] if args.device else [])
         )
+
+    # A --device on the command line applies to every run, benchmark configs included: the same
+    # sweep is run on whatever machine is free, and the config should not have to be edited for it.
+    if args.device:
+        for s in specs:
+            s.device = args.device
 
     if args.only:
         known = {s.name for s in specs}

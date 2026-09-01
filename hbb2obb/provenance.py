@@ -266,6 +266,7 @@ def write_conversion_provenance(
     opening_kernel_percentage: float,
     confidence_source: str = "conversion",
     model_kwargs: Optional[str] = None,
+    device: Optional[str] = None,
     models_dir: Path = Path("models"),
     notes: Sequence[str] = (),
 ) -> int:
@@ -281,6 +282,8 @@ def write_conversion_provenance(
     command += ["--opening_kernel_percentage", str(opening_kernel_percentage)]
     if confidence_source != "conversion":
         command += ["--confidence_source", confidence_source]
+    if device:
+        command += ["--device", device]
     if model_kwargs:
         command += ["--model_kwargs", model_kwargs]
 
@@ -298,6 +301,7 @@ def write_conversion_provenance(
         f"Scale factor(s)          : {' '.join(str(s) for s in scale_factors)}",
         f"Opening kernel           : {opening_kernel_percentage}",
         f"Confidence source        : {confidence_source}",
+        f"Inference device         : {device if device else 'ultralytics default'}",
     ]
     if model_kwargs:
         lines.append(f"Extra model kwargs       : {model_kwargs}")
@@ -342,6 +346,7 @@ def write_detection_provenance(
     classes: Optional[Sequence[int]] = None,
     merged_with: Optional[Path] = None,
     model_kwargs: Optional[str] = None,
+    device: Optional[str] = None,
     notes: Sequence[str] = (),
 ) -> int:
     """Record the detector that drew a set of horizontal boxes."""
@@ -351,6 +356,8 @@ def write_detection_provenance(
     command += ["--model", model, "--imgsz", str(imgsz), "--conf", str(conf), "--iou", str(iou)]
     if classes:
         command += ["--classes", *[str(c) for c in classes]]
+    if device:
+        command += ["--device", device]
     if merged_with:
         command += ["--merge_with", str(merged_with)]
     if model_kwargs:
@@ -370,6 +377,7 @@ def write_detection_provenance(
         f"Confidence threshold     : {conf}",
         f"NMS IoU threshold        : {iou}",
         f"Classes kept             : {' '.join(str(c) for c in classes) if classes else 'all'}",
+        f"Inference device         : {device if device else 'ultralytics default'}",
     ]
     if model_kwargs:
         lines.append(f"Extra model kwargs       : {model_kwargs}")
