@@ -739,17 +739,6 @@ def read_confidences(directory: Path) -> Dict[str, List[float]]:
     return out
 
 
-def apply_confidence(frames: Sequence[FrameAnnotations], scores: Dict[str, List[float]]) -> int:
-    """Attach side-car confidence scores to boxes by row index. Returns the number attached."""
-    n = 0
-    for frame in frames:
-        row = _rows_for(frame, scores)
-        for box, score in zip(frame.boxes, row):
-            box.score = score
-            n += 1
-    return n
-
-
 def apply_difficult_from_confidence(
     frames: Sequence[FrameAnnotations], scores: Dict[str, List[float]], threshold: float
 ) -> int:

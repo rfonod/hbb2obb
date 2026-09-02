@@ -351,30 +351,82 @@ def test_difficult_from_confidence_without_scores_says_so(monkeypatch, tmp_path,
     assert "confidence_dir" in str(code)
 
 
+def test_a_partly_scored_source_is_refused(monkeypatch, tmp_path, label_map):
+    """One frame with a confidence column and one without has no score to compare for half the boxes."""
+    labels = tmp_path / "labels_obb"
+    labels.mkdir()
+    (labels / "img1.txt").write_text("0 30 10 50 30 30 50 10 30 0.91\n", encoding="utf-8")
+    (labels / "img2.txt").write_text("0 30 10 50 30 30 50 10 30\n", encoding="utf-8")
+    code = run(
+        monkeypatch,
+        labels,
+        "--from",
+        "yolo",
+        "--to",
+        "dota",
+        "-o",
+        tmp_path / "out",
+        "-iw",
+        100,
+        "-ih",
+        200,
+        "-mp",
+        label_map,
+        "--difficult_from",
+        "confidence",
+    )
+    assert "not every box" in str(code)
+
+
+def test_a_confidence_dir_that_feeds_nothing_is_refused(monkeypatch, tmp_path, obb_with_sidecar, label_map):
+    """--confidence_dir is an input to --difficult_from confidence; alone it would be read by nothing."""
+    labels, scores = obb_with_sidecar
+    code = run(
+        monkeypatch,
+        labels,
+        "--from",
+        "yolo",
+        "--to",
+        "coco",
+        "-o",
+        tmp_path / "out",
+        "-iw",
+        100,
+        "-ih",
+        200,
+        "-mp",
+        label_map,
+        "--confidence_dir",
+        scores,
+    )
+    assert "difficult_from confidence" in str(code)
+
+
 def test_a_mismatched_sidecar_is_refused(monkeypatch, tmp_path, obb_with_sidecar, label_map):
+    """A side-car that does not line up with the labels stops the run, and says why, not a traceback."""
     labels, scores = obb_with_sidecar
     (scores / "img1.txt").write_text("0.9\n", encoding="utf-8")  # one score, two boxes
-    with pytest.raises(ValueError, match="align confidences"):
-        run(
-            monkeypatch,
-            labels,
-            "--from",
-            "yolo",
-            "--to",
-            "dota",
-            "-o",
-            tmp_path / "out",
-            "-iw",
-            100,
-            "-ih",
-            200,
-            "-mp",
-            label_map,
-            "--difficult_from",
-            "confidence",
-            "--confidence_dir",
-            scores,
-        )
+    code = run(
+        monkeypatch,
+        labels,
+        "--from",
+        "yolo",
+        "--to",
+        "dota",
+        "-o",
+        tmp_path / "out",
+        "-iw",
+        100,
+        "-ih",
+        200,
+        "-mp",
+        label_map,
+        "--difficult_from",
+        "confidence",
+        "--confidence_dir",
+        scores,
+    )
+    assert "align confidences" in str(code)
 
 
 # ------------------------------------------------- verifying a published images/ + labels/ release

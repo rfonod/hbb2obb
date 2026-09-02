@@ -619,7 +619,10 @@ def main_hbb2obb_convert():
         "--confidence_dir",
         metavar="DIR",
         type=Path,
-        help="Side-car directory of per-box confidence scores, as written by 'hbb2obb --confidence_dir'",
+        help=(
+            "Side-car directory of per-box confidence scores, as written by 'hbb2obb --confidence_dir'. "
+            "Read only by --difficult_from confidence; the scores stay out of the written labels."
+        ),
     )
     parser.add_argument(
         "--difficult_below",
@@ -673,17 +676,29 @@ def main_hbb2obb_convert():
         f"from {args.source} ({src_format})"
     )
 
+    if args.confidence_dir and args.difficult_from != "confidence":
+        raise SystemExit(
+            "--confidence_dir is read only by --difficult_from confidence, which is what turns the "
+            "scores into a per-box flag; without it the scores would go nowhere, since no output "
+            "format takes them from a side-car"
+        )
+
     if args.difficult_from == "confidence":
         if args.confidence_dir:
             scores = formats.read_confidences(args.confidence_dir)
-        elif any(b.score is not None for f in frames for b in f.boxes):
+        elif all(b.score is not None for f in frames for b in f.boxes) and formats.count_boxes(frames):
+            # Every box, not merely some: a set that mixes scored and unscored lines has no score
+            # to compare for the unscored ones, and guessing one would flag or spare them silently.
             scores = {f.stem: [b.score for b in f.boxes] for f in frames}
         else:
             raise SystemExit(
-                "--difficult_from confidence found no scores: the source labels carry no confidence "
-                "column, so pass --confidence_dir with the side-car directory"
+                "--difficult_from confidence found no scores: not every box in the source labels "
+                "carries a confidence column, so pass --confidence_dir with the side-car directory"
             )
-        n = formats.apply_difficult_from_confidence(frames, scores, args.difficult_below)
+        try:
+            n = formats.apply_difficult_from_confidence(frames, scores, args.difficult_below)
+        except ValueError as exc:
+            raise SystemExit(f"--difficult_from confidence: {exc}") from exc
         print(f"Flagged {n} box(es) difficult, scoring below {args.difficult_below:g}")
     elif args.difficult_from:
         source = args.source if args.source.is_dir() else args.source.parent
