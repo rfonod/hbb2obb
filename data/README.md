@@ -8,7 +8,7 @@ Everything here except the four inputs listed below is produced by the tools in 
 
 The sample images provided in the `images` folder are sourced from the [Songdo Vision](https://doi.org/10.5281/zenodo.13828407) dataset and are re-used here under the Creative Commons Attribution 4.0 International (CC-BY-4.0) license.
 
-> **These three frames are part of the Songdo Vision test split.** `00164.jpg`, `04433.jpg` and `05050.jpg` are byte-identical to the images of the same name in the `test` subset of Songdo Vision (verified by MD5). They are fine as a demonstration and regression fixture, which is all they are here for, but any accuracy number measured on them is measured on test data. Do not tune or benchmark on this folder and then report the result against Songdo Vision or Songdo Vision+.
+> **These three frames are part of the Songdo Vision test split.** `00164.jpg`, `04433.jpg` and `05050.jpg` are byte-identical to the images of the same name in the `test` subset of Songdo Vision (verified by MD5). They are fine as a demonstration and regression fixture, which is all they are here for, but any accuracy number measured on them is measured on test data. Do not tune or benchmark on this folder and then report the result against Songdo Vision or Songdo Vision OBB.
 
 ### Original Dataset Details:
 - **DOI:** [10.5281/zenodo.13828407](https://doi.org/10.5281/zenodo.13828407) (concept DOI, resolves to the latest version)
@@ -75,7 +75,7 @@ data/
 
 All three sets ship in three formats apiece, so the tooling has something to work against out of the box. The YOLO TXT file is canonical in each case and the others are one common rounding of it, which is why every derived format below is written **from the `.txt`** (`-f yolo`) rather than from another derived file.
 
-Unlike the 50-frame tuning set released with Songdo Vision+, the HBBs here are **not** the axis-aligned envelopes of the ground-truth OBBs, and the two sets are not row-aligned: one is detected, the other drawn by hand, and neither was derived from the other. They also do not describe quite the same objects, which is what step 5 measures.
+Unlike the 50-frame tuning set released with Songdo Vision OBB, the HBBs here are **not** the axis-aligned envelopes of the ground-truth OBBs, and the two sets are not row-aligned: one is detected, the other drawn by hand, and neither was derived from the other. They also do not describe quite the same objects, which is what step 5 measures.
 
 ## Reproducing This Folder
 
@@ -240,4 +240,4 @@ The `sam_b` run is the configuration `labels_obb/` was produced with, which is w
 
 `sam_b/plot.png`, the per-run plot every sweep folder ships: average IoU against scale factor, coloured by image size, with marker area encoding execution time. The peak at 1280 px and scale factor 0.05 is the grid point named just above. A sweep over several opening kernels shades each hue by kernel, so the kernels stay apart in the one plot; this sweep uses a single kernel, so the colours are the plain palette.
 
-> **These are illustrative numbers, not the benchmark.** They come from 201 boxes over 3 frames, which is far too small to select hyperparameters on, and those frames are Songdo Vision test images (see [Data Attribution](#data-attribution)). The real study runs against the 50-frame tuning set released with **Songdo Vision+**, which shares no image with Songdo Vision; its inputs and its output artifacts live there, alongside the configuration they were produced with.
+> **These are illustrative numbers, not the benchmark.** They come from 201 boxes over 3 frames, which is far too small to select hyperparameters on, and those frames are Songdo Vision test images (see [Data Attribution](#data-attribution)). The real study runs against the 50-frame tuning set released with **Songdo Vision OBB**, which shares no image with Songdo Vision; its inputs and its output artifacts live there, alongside the configuration they were produced with.
