@@ -13,6 +13,7 @@ from hbb2obb.converter import (
     load_sam_model,
     pack_results,
     resolve_confidences,
+    save_confidence_annotations,
     save_obb_annotations,
     save_polygon_annotations,
     scale_bounding_boxes,
@@ -671,3 +672,40 @@ class TestDeviceForwarding(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConfidenceSidecar(unittest.TestCase):
+    """save_confidence_annotations writes the scores beside the labels, not inside them."""
+
+    def test_scores_are_written_one_per_line_and_row_aligned(self):
+        obb_annotations = np.array(
+            [
+                [0, 100, 100, 300, 100, 300, 200, 100, 200],
+                [1, 400, 400, 600, 400, 600, 500, 400, 500],
+            ]
+        )
+        confidences = [0.7321, 0.0]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_path = root / "images" / "sample.jpg"
+            img_path.parent.mkdir()
+
+            save_obb_annotations(obb_annotations, root / "labels_obb", img_path)
+            save_confidence_annotations(confidences, root / "labels_confidence", img_path)
+
+            labels = (root / "labels_obb" / "sample.txt").read_text().splitlines()
+            scores = (root / "labels_confidence" / "sample.txt").read_text().splitlines()
+
+            # The label file keeps its nine standard fields; the scores live next door, row-aligned.
+            self.assertEqual([len(line.split()) for line in labels], [9, 9])
+            self.assertEqual(len(scores), len(labels))
+            self.assertAlmostEqual(float(scores[0]), 0.7321, places=4)
+            self.assertAlmostEqual(float(scores[1]), 0.0, places=4)
+
+    def test_the_directory_defaults_beside_the_images(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            img_path = Path(tmp) / "images" / "sample.jpg"
+            img_path.parent.mkdir()
+            save_confidence_annotations([0.5], None, img_path)
+            self.assertTrue((Path(tmp) / "labels_confidence" / "sample.txt").is_file())

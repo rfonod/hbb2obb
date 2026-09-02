@@ -658,6 +658,22 @@ def save_obb_annotations(obb_annotations: np.ndarray, obb_dir: Path, img_path: P
             f.write(format_annotation_line(line, confidences, i) + "\n")
 
 
+def save_confidence_annotations(confidences: List[float], confidence_dir: Path, img_path: Path) -> None:
+    """
+    Save the per-object confidence scores to their own file, one score per line.
+
+    Row-aligned with the OBB file for the same image: line i of both describes the same object.
+    This is the alternative to the 10th column ``save_obb_annotations`` writes, for annotation
+    sets whose label files have to stay strictly standard. Ultralytics, for one, rejects a 10th
+    column on a YOLO OBB label, so a release that wants both a usable label file and a per-box
+    score has to put the score somewhere else.
+    """
+    confidence_dir = resolve_output_dir(confidence_dir, img_path, "labels_confidence")
+    with open(confidence_dir / (img_path.stem + ".txt"), "w", encoding="utf-8") as f:
+        for score in confidences:
+            f.write(f"{score:.4f}\n")
+
+
 def save_polygon_annotations(
     contours: List[np.ndarray],
     obb_annotations: np.ndarray,

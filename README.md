@@ -184,6 +184,7 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--scale_factors` / `-sf`: factor(s) to scale HBBs (single value, or two values for short/long sides).
 - `--opening_kernel_percentage` / `-okp`: morphological opening kernel size as a percentage of the mask's smaller dimension.
 - `--save_confidence`: append a per-OBB [confidence score](#confidence-scores) as a 10th column in the output TXT files.
+- `--confidence_dir` / `-cd`: write those scores to their own directory instead, one score per line, row-aligned with the labels. Use it when the label files have to stay strictly standard, since Ultralytics and other YOLO OBB readers reject a 10th column. Give it bare for `img_source/../labels_confidence`.
 - `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
 - `--device`: inference device for the SAM model(s), e.g. `cpu`, `0`, `cuda:0`, `mps` (default: Ultralytics picks).
 - `--model_kwargs` / `-k`: extra Ultralytics inference kwargs as `key1=value1,key2=value2`.
@@ -345,7 +346,7 @@ hbb2obb-view data/images -o /path/to/annotated
 <details>
 <summary><b>Color legend and keyboard shortcuts</b></summary>
 
-Green is the OBB, white its source HBB, red the segmentation polygon it was fitted to, orange a box flagged `difficult`; with `--show_confidence` the OBB is tinted green→red by score, the same gradient `--save_img` uses. The last two need the conversion to have been run with `--save_polygon` and `--save_confidence`, which is how the sample data in `data/` was produced (see [`data/README.md`](data/README.md) for the exact commands behind every file there).
+Green is the OBB, white its source HBB, red the segmentation polygon it was fitted to, orange a box flagged `difficult`; with `--show_confidence` the OBB is tinted green→red by score, the same gradient `--save_img` uses. The last two need the conversion to have been run with `--save_polygon` and `--save_confidence`, which is how the sample data in `data/` was produced (see [`data/README.md`](data/README.md) for the exact commands behind every file there). Labels that carry no confidence column still color by score if the scores are in a side-car directory: the viewer reads `labels_confidence/` beside them, or wherever `--confidence_dir` points.
 
 | Key | | Key | |
 | :--- | :--- | :--- | :--- |
@@ -388,7 +389,7 @@ hbb2obb-convert /path/to/dataset --verify -mp label_map.yaml
 
 `--verify` compares the formats by exact equality after rounding rather than by a tolerance, because they are all one common rounding of a single canonical source. That is the property worth testing: rounding full precision and rounding an already-rounded canonical disagree wherever a coordinate lands on a half pixel, and an envelope then silently stops matching the box it was derived from.
 
-Only DOTA and Pascal VOC can express a per-box `difficult` flag, so writing either one from YOLO or COCO resets it; `--difficult_from dota` carries the flags across. Only YOLO and COCO can carry a confidence, so DOTA and Pascal VOC drop it. Image dimensions come from `--images`, or from `--img_width` / `--img_height`, and are needed to denormalize relative YOLO coordinates. LabelMe stores class names rather than ids, so pass `-mp` when round-tripping through it to pin the ids.
+Only DOTA and Pascal VOC can express a per-box `difficult` flag, so writing either one from YOLO or COCO resets it; `--difficult_from dota` carries the flags across. `--difficult_from confidence` instead derives the flag from the conversion score, flagging everything below `--difficult_below` (fallback boxes score 0.0, so they are always flagged); the scores come from a trailing column on the source labels, or from `--confidence_dir` when the labels are standard ones with the scores in a side-car. The scores themselves stay out of the output, so the flag can be set without the coordinates or the other formats beside them carrying anything extra. Only YOLO and COCO can carry a confidence, so DOTA and Pascal VOC drop it. Image dimensions come from `--images`, or from `--img_width` / `--img_height`, and are needed to denormalize relative YOLO coordinates. LabelMe stores class names rather than ids, so pass `-mp` when round-tripping through it to pin the ids.
 
 A COCO file is named `coco_annotations_<kind>.json` unless `--coco_name` says otherwise, which is also how `--verify` pairs one with its directory: `labels_<name>/` goes with `coco_annotations_<name>.json` beside it. Where a directory holds the canonical YOLO files next to derived ones, `--from` is detected as `yolo`, so a second pass through the converter never rounds an already rounded file.
 
