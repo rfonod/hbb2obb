@@ -274,6 +274,9 @@ def test_dry_run_runs_nothing(monkeypatch, tmp_path, capsys, no_sweep):
     out = capsys.readouterr().out
     assert "Total          : 4 conversions" in out
     assert not (tmp_path / "bench" / optimizer.BENCHMARK_SUMMARY_NAME).exists()
+    # It reports what would happen and writes nothing, the output folder included: a typo there
+    # should not leave a stray empty directory behind.
+    assert not (tmp_path / "bench").exists()
 
 
 def test_a_config_run_writes_every_artifact(monkeypatch, tmp_path, no_sweep):

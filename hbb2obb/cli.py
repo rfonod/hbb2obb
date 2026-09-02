@@ -1247,7 +1247,6 @@ def main_hbb2obb_optimize():
         specs = [s for s in specs if s.name in args.only]
 
     hbb_dir = get_hbb_dir(img_source, hbb_dir)
-    output_folder.mkdir(parents=True, exist_ok=True)
 
     if args.dry_run or args.refresh:
         pass
@@ -1270,7 +1269,13 @@ def main_hbb2obb_optimize():
     print(f"Total          : {total_points} conversions of the whole image set")
 
     if args.dry_run:
+        # A dry run says what would happen and touches nothing, so the output folder is created
+        # only below. Otherwise a typo in output_folder leaves a stray empty directory behind,
+        # which is exactly what someone checking their config before an unattended sweep does not
+        # want to have to notice.
         return
+
+    output_folder.mkdir(parents=True, exist_ok=True)
 
     started = time.time()
     swept, skipped = [], []
