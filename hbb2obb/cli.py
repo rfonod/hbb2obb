@@ -222,9 +222,9 @@ def main_hbb2obb():
         "--save_provenance",
         action="store_true",
         help=(
-            "Write a PROVENANCE.txt one level above the OBB annotations, beside the label directory "
-            "rather than inside it: the command that reproduces them, the hbb2obb version and commit, "
-            "the dependency versions and the SHA-256 of every checkpoint used"
+            "Write a PROVENANCE.txt one level above the OBB annotations: the command that reproduces "
+            "them, the hbb2obb version and commit, the dependency versions and the SHA-256 of every "
+            "checkpoint used"
         ),
     )
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
@@ -400,10 +400,8 @@ def main_hbb2obb_detect():
         "--save_provenance",
         action="store_true",
         help=(
-            "Write a PROVENANCE_hbb.txt one level above the annotations, beside the label directory "
-            "rather than inside it: the command that reproduces them, the settings "
-            "used and the SHA-256 of the detector checkpoint that actually ran. The name keeps it "
-            "clear of the conversion's own PROVENANCE.txt, which lands in that same directory"
+            "Write a PROVENANCE_hbb.txt one level above the annotations: the command that reproduces "
+            "them, the settings used and the SHA-256 of the detector checkpoint that ran"
         ),
     )
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
