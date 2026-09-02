@@ -42,7 +42,10 @@ ENTRY_POINTS_EPILOG = (
 )
 
 
-def provenance_path(label_dir: Path) -> Path:
+DETECTION_PROVENANCE_NAME = "PROVENANCE_hbb.txt"
+
+
+def provenance_path(label_dir: Path, name: str = "PROVENANCE.txt") -> Path:
     """
     Where a conversion's or detection's PROVENANCE.txt goes: beside the label directory, not in it.
 
@@ -50,8 +53,13 @@ def provenance_path(label_dir: Path) -> Path:
     is not this one, so a record left inside would be parsed as a frame. One level up it sits with
     ``images/`` and ``labels/``, describing the set rather than belonging to it. ``hbb2obb-optimize``
     is unaffected: its record goes in the output folder, which holds runs rather than labels.
+
+    One level up is shared, though: ``labels_hbb`` and ``labels_obb`` have the same parent, so a
+    detection record under the plain name would be overwritten by the conversion that reads it,
+    losing the detector's checkpoint hash and settings. Detection therefore writes
+    ``PROVENANCE_hbb.txt``, and the conversion keeps the plain name for the set it produces.
     """
-    return label_dir.parent / "PROVENANCE.txt"
+    return label_dir.parent / name
 
 
 def main_hbb2obb():
@@ -392,9 +400,10 @@ def main_hbb2obb_detect():
         "--save_provenance",
         action="store_true",
         help=(
-            "Write a PROVENANCE.txt one level above the annotations, beside the label directory "
+            "Write a PROVENANCE_hbb.txt one level above the annotations, beside the label directory "
             "rather than inside it: the command that reproduces them, the settings "
-            "used and the SHA-256 of the detector checkpoint that actually ran"
+            "used and the SHA-256 of the detector checkpoint that actually ran. The name keeps it "
+            "clear of the conversion's own PROVENANCE.txt, which lands in that same directory"
         ),
     )
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
@@ -504,7 +513,7 @@ def main_hbb2obb_detect():
         # detector's own validated setting, which is the value worth pinning.
         spec = spec_for(args.model)
         provenance.write_detection_provenance(
-            out=provenance_path(hbb_dir),
+            out=provenance_path(hbb_dir, DETECTION_PROVENANCE_NAME),
             img_source=args.img_source,
             hbb_dir=hbb_dir,
             model=args.model,

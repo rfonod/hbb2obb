@@ -35,6 +35,19 @@ def test_provenance_lands_beside_the_labels_not_among_them(tmp_path):
     assert cli.provenance_path(labels) == tmp_path / "train" / "PROVENANCE.txt"
 
 
+def test_detection_and_conversion_records_do_not_overwrite_each_other(tmp_path):
+    """
+    labels_hbb and labels_obb share a parent, so one level up is one path for both commands. The
+    detection record therefore has its own name; under the plain one the conversion that reads
+    those HBBs would erase the detector's checkpoint hash and settings.
+    """
+    root = tmp_path / "dataset"
+    detection = cli.provenance_path(root / "labels_hbb", cli.DETECTION_PROVENANCE_NAME)
+    conversion = cli.provenance_path(root / "labels_obb")
+    assert detection.parent == conversion.parent == root
+    assert detection != conversion
+
+
 def test_the_optimizer_keeps_its_own_placement():
     """A sweep's output folder holds runs, not labels, so its record stays inside it."""
     from hbb2obb import optimizer
