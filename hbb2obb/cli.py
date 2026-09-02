@@ -42,6 +42,18 @@ ENTRY_POINTS_EPILOG = (
 )
 
 
+def provenance_path(label_dir: Path) -> Path:
+    """
+    Where a conversion's or detection's PROVENANCE.txt goes: beside the label directory, not in it.
+
+    It is a ``.txt`` file, and a label directory is read with ``labels/*.txt`` by most tooling that
+    is not this one, so a record left inside would be parsed as a frame. One level up it sits with
+    ``images/`` and ``labels/``, describing the set rather than belonging to it. ``hbb2obb-optimize``
+    is unaffected: its record goes in the output folder, which holds runs rather than labels.
+    """
+    return label_dir.parent / "PROVENANCE.txt"
+
+
 def main_hbb2obb():
     """
     Run the HBB to OBB conversion from command line.
@@ -202,8 +214,9 @@ def main_hbb2obb():
         "--save_provenance",
         action="store_true",
         help=(
-            "Write a PROVENANCE.txt beside the OBB annotations: the command that reproduces them, the "
-            "hbb2obb version and commit, the dependency versions and the SHA-256 of every checkpoint used"
+            "Write a PROVENANCE.txt one level above the OBB annotations, beside the label directory "
+            "rather than inside it: the command that reproduces them, the hbb2obb version and commit, "
+            "the dependency versions and the SHA-256 of every checkpoint used"
         ),
     )
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
@@ -278,7 +291,7 @@ def main_hbb2obb():
 
         obb_dir = resolve_output_dir(args.obb_dir, image_paths[0], "labels_obb")
         provenance.write_conversion_provenance(
-            out=obb_dir / "PROVENANCE.txt",
+            out=provenance_path(obb_dir),
             img_source=args.img_source,
             hbb_dir=get_hbb_dir(args.img_source, args.hbb_dir),
             obb_dir=obb_dir,
@@ -379,7 +392,8 @@ def main_hbb2obb_detect():
         "--save_provenance",
         action="store_true",
         help=(
-            "Write a PROVENANCE.txt beside the annotations: the command that reproduces them, the settings "
+            "Write a PROVENANCE.txt one level above the annotations, beside the label directory "
+            "rather than inside it: the command that reproduces them, the settings "
             "used and the SHA-256 of the detector checkpoint that actually ran"
         ),
     )
@@ -490,7 +504,7 @@ def main_hbb2obb_detect():
         # detector's own validated setting, which is the value worth pinning.
         spec = spec_for(args.model)
         provenance.write_detection_provenance(
-            out=hbb_dir / "PROVENANCE.txt",
+            out=provenance_path(hbb_dir),
             img_source=args.img_source,
             hbb_dir=hbb_dir,
             model=args.model,
