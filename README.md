@@ -27,7 +27,7 @@
 - **Segmentation-based**: uses state-of-the-art SAM models for accurate object boundary detection.
 - **Multiple model support**: SAM, SAM2, SAM2.1, SAM3, Mobile SAM, and FastSAM families ([details](https://docs.ultralytics.com/models/sam/)).
 - **Model ensemble**: combine multiple models via majority voting for enhanced accuracy.
-- **Confidence scoring**: a per-OBB quality score flags fallbacks and low-confidence conversions for triage, optionally combined with the detector confidence from the input ([details](#confidence-scores)).
+- **Confidence scoring**: a per-OBB quality score flags fallbacks and low-confidence conversions for triage, optionally combined with the detector confidence from the input, written as an extra column or to a side-car directory that leaves the label files standard ([details](#confidence-scores)).
 - **Polygon output**: optionally save the segmentation contour behind each OBB, row-aligned with the OBB file, as a tighter object outline for downstream masking ([details](#data-format)).
 - **Evaluation tools**: assess OBB accuracy against ground truth using IoU metrics.
 - **Hyperparameter optimization**: search SAM inference resolutions, HBB scale factors and opening kernels for the best settings on your data, one sweep at a time or a whole benchmark from a config file.
