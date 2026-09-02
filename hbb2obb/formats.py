@@ -53,8 +53,13 @@ SET_FORMATS = ("coco",)
 EXTENSIONS = {"yolo": ".txt", "dota": ".txt", "voc": ".xml", "coco": ".json", "labelme": ".json"}
 
 # Canonical DOTA uses .txt inside a labelTxt/ directory. When the DOTA files sit beside the YOLO
-# ones, as in the Songdo Vision+ release, they need a distinct extension.
+# ones, as in the Songdo Vision OBB release, they need a distinct extension.
 DOTA_EXT = ".dota"
+
+# Directories hbb2obb writes beside a label set that hold one .txt per frame but are not label
+# sets: a score per line, and a variable-length contour per line. Anything walking a tree looking
+# for annotations has to skip them, or it reads a confidence file as a malformed YOLO label.
+SIDECAR_DIRS = frozenset({"labels_confidence", "labels_polygon"})
 
 # Two decimals in absolute pixels is well under the precision any annotation actually carries, and
 # it is what the integer formats round from.
@@ -718,6 +723,50 @@ def apply_difficult(frames: Sequence[FrameAnnotations], source: Sequence[FrameAn
             box.difficult = ref.difficult
             n += ref.difficult
     return n
+
+
+def read_confidences(directory: Path) -> Dict[str, List[float]]:
+    """
+    Read a side-car confidence directory: one ``<stem>.txt`` per frame, one score per line.
+
+    This is what ``hbb2obb --confidence_dir`` writes, for annotation sets whose label files have
+    to stay strictly standard and so cannot carry the score as a trailing column. The scores are
+    row-aligned with the labels of the same stem.
+    """
+    out: Dict[str, List[float]] = {}
+    for path in sorted(Path(directory).glob("*.txt")):
+        out[path.stem] = [float(line) for line in path.read_text(encoding="utf-8").split() if line]
+    return out
+
+
+def apply_difficult_from_confidence(
+    frames: Sequence[FrameAnnotations], scores: Dict[str, List[float]], threshold: float
+) -> int:
+    """
+    Set ``difficult`` on every box whose confidence is below ``threshold``. Returns how many.
+
+    The scores stay out of the boxes on purpose: this is for writing a DOTA or Pascal VOC set
+    whose flag says "do not trust this box's orientation" while the coordinates and the other
+    formats beside them carry nothing extra. A fallback box scores 0.0 and is therefore always
+    flagged, whatever the threshold.
+    """
+    n = 0
+    for frame in frames:
+        row = _rows_for(frame, scores)
+        for box, score in zip(frame.boxes, row):
+            box.difficult = int(score < threshold)
+            n += box.difficult
+    return n
+
+
+def _rows_for(frame: FrameAnnotations, scores: Dict[str, List[float]]) -> List[float]:
+    """The confidence row for one frame, checked against its box count."""
+    row = scores.get(frame.stem)
+    if row is None:
+        raise ValueError(f"No confidence scores found for frame {frame.stem}")
+    if len(row) != len(frame):
+        raise ValueError(f"Cannot align confidences for {frame.stem}: {len(row)} scores, {len(frame)} boxes")
+    return row
 
 
 # ------------------------------------------------------------------------------------ set level

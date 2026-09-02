@@ -29,13 +29,49 @@ SUPPORTED_SAM_MODELS = [
     "FastSAM-x",
 ]
 
+# Shown at the end of `hbb2obb --help` so a new user discovers the rest of the toolkit.
+ENTRY_POINTS_EPILOG = (
+    "The hbb2obb toolkit ships six commands:\n"
+    "  hbb2obb           convert HBB annotations to OBBs by prompting SAM (this command)\n"
+    "  hbb2obb-detect    detect HBBs with an Ultralytics model, for images that have none\n"
+    "  hbb2obb-convert   convert annotations between YOLO, DOTA, Pascal VOC, COCO and LabelMe\n"
+    "  hbb2obb-view      inspect HBB and OBB annotations over their images, interactively\n"
+    "  hbb2obb-eval      score predicted OBBs against ground truth (precision, recall, F1, IoU)\n"
+    "  hbb2obb-optimize  search hyperparameters, as one sweep or a whole benchmark\n\n"
+    "Run any of them with --help for its own options, e.g. hbb2obb-detect --help."
+)
+
+
+DETECTION_PROVENANCE_NAME = "PROVENANCE_hbb.txt"
+
+
+def provenance_path(label_dir: Path, name: str = "PROVENANCE.txt") -> Path:
+    """
+    Where a conversion's or detection's PROVENANCE.txt goes: beside the label directory, not in it.
+
+    It is a ``.txt`` file, and a label directory is read with ``labels/*.txt`` by most tooling that
+    is not this one, so a record left inside would be parsed as a frame. One level up it sits with
+    ``images/`` and ``labels/``, describing the set rather than belonging to it. ``hbb2obb-optimize``
+    is unaffected: its record goes in the output folder, which holds runs rather than labels.
+
+    One level up is shared, though: ``labels_hbb`` and ``labels_obb`` have the same parent, so a
+    detection record under the plain name would be overwritten by the conversion that reads it,
+    losing the detector's checkpoint hash and settings. Detection therefore writes
+    ``PROVENANCE_hbb.txt``, and the conversion keeps the plain name for the set it produces.
+    """
+    return label_dir.parent / name
+
 
 def main_hbb2obb():
     """
     Run the HBB to OBB conversion from command line.
     """
 
-    parser = argparse.ArgumentParser(description="Convert HBB to OBB annotations")
+    parser = argparse.ArgumentParser(
+        description="Convert HBB to OBB annotations",
+        epilog=ENTRY_POINTS_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
 
     # Main arguments
@@ -146,6 +182,20 @@ def main_hbb2obb():
         ),
     )
     parser.add_argument(
+        "--confidence_dir",
+        "-cd",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Write the per-OBB confidence scores to their own directory, one score per line, "
+            "row-aligned with the label files. Give it bare for img_source/../labels_confidence. "
+            "Use this rather than --save_confidence when the label files have to stay standard: "
+            "Ultralytics and other YOLO OBB readers reject a 10th column"
+        ),
+    )
+    parser.add_argument(
         "--save_polygon",
         action="store_true",
         help="Also save the segmentation polygon of each object, a tighter alternative to its OBB",
@@ -158,6 +208,11 @@ def main_hbb2obb():
         help="Simplify saved polygons with an epsilon of this fraction of the contour perimeter (0 to disable)",
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        help="Inference device for the SAM model(s), e.g. 'cpu', '0', 'cuda:0', 'mps' (default: ultralytics picks)",
+    )
+    parser.add_argument(
         "--model_kwargs",
         "-k",
         type=str,
@@ -167,8 +222,9 @@ def main_hbb2obb():
         "--save_provenance",
         action="store_true",
         help=(
-            "Write a PROVENANCE.txt beside the OBB annotations: the command that reproduces them, the "
-            "hbb2obb version and commit, the dependency versions and the SHA-256 of every checkpoint used"
+            "Write a PROVENANCE.txt one level above the OBB annotations: the command that reproduces "
+            "them, the hbb2obb version and commit, the dependency versions and the SHA-256 of every "
+            "checkpoint used"
         ),
     )
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
@@ -182,13 +238,21 @@ def main_hbb2obb():
     from hbb2obb.converter import (
         hbb2obb,
         resolve_output_dir,
+        save_confidence_annotations,
         save_obb_annotations,
         save_polygon_annotations,
         unpack_results,
     )
-    from hbb2obb.utils import get_image_paths, get_hbb_dir, process_ultralytics_kwargs
+    from hbb2obb.utils import get_hbb_dir, get_image_paths, process_ultralytics_kwargs
 
     model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
+
+    # --confidence_dir writes the scores beside the labels rather than into them, so it needs the
+    # scores computed without putting them in the label file. An empty string is the bare form,
+    # meaning the conventional location.
+    write_confidence_dir = args.confidence_dir is not None
+    confidence_dir = Path(args.confidence_dir) if args.confidence_dir else None
+    want_confidence = args.save_confidence or write_confidence_dir
 
     image_paths = get_image_paths(args.img_source)
     for img_path in tqdm.tqdm(image_paths, desc="Processing images", leave=True, disable=args.no_bar):
@@ -208,20 +272,26 @@ def main_hbb2obb():
             show_labels=args.show_labels,
             show_confidence=args.show_confidence,
             model_kwargs=model_kwargs,
-            return_confidence=args.save_confidence,
+            device=args.device,
+            return_confidence=want_confidence,
             confidence_source=args.confidence_source,
             return_contours=args.save_polygon,
         )
 
         # Unpack the extras hbb2obb() appends for the flags that were requested
         obb_annotations, confidences, contours = unpack_results(
-            result, return_confidence=args.save_confidence, return_contours=args.save_polygon
+            result, return_confidence=want_confidence, return_contours=args.save_polygon
         )
 
-        save_obb_annotations(obb_annotations, args.obb_dir, img_path, confidences=confidences)
+        # The trailing column is written only when it was asked for by name; --confidence_dir on
+        # its own leaves the label files with their standard nine fields.
+        in_line = confidences if args.save_confidence else None
+        save_obb_annotations(obb_annotations, args.obb_dir, img_path, confidences=in_line)
+        if write_confidence_dir:
+            save_confidence_annotations(confidences, confidence_dir, img_path)
         if args.save_polygon:
             save_polygon_annotations(
-                contours, obb_annotations, args.polygon_dir, img_path, confidences, args.polygon_epsilon
+                contours, obb_annotations, args.polygon_dir, img_path, in_line, args.polygon_epsilon
             )
 
     if args.save_provenance and image_paths:
@@ -229,7 +299,7 @@ def main_hbb2obb():
 
         obb_dir = resolve_output_dir(args.obb_dir, image_paths[0], "labels_obb")
         provenance.write_conversion_provenance(
-            out=obb_dir / "PROVENANCE.txt",
+            out=provenance_path(obb_dir),
             img_source=args.img_source,
             hbb_dir=get_hbb_dir(args.img_source, args.hbb_dir),
             obb_dir=obb_dir,
@@ -239,6 +309,7 @@ def main_hbb2obb():
             opening_kernel_percentage=args.opening_kernel_percentage,
             confidence_source=args.confidence_source,
             model_kwargs=args.model_kwargs,
+            device=args.device,
         )
 
 
@@ -329,8 +400,8 @@ def main_hbb2obb_detect():
         "--save_provenance",
         action="store_true",
         help=(
-            "Write a PROVENANCE.txt beside the annotations: the command that reproduces them, the settings "
-            "used and the SHA-256 of the detector checkpoint that actually ran"
+            "Write a PROVENANCE_hbb.txt one level above the annotations: the command that reproduces "
+            "them, the settings used and the SHA-256 of the detector checkpoint that ran"
         ),
     )
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
@@ -440,7 +511,7 @@ def main_hbb2obb_detect():
         # detector's own validated setting, which is the value worth pinning.
         spec = spec_for(args.model)
         provenance.write_detection_provenance(
-            out=hbb_dir / "PROVENANCE.txt",
+            out=provenance_path(hbb_dir, DETECTION_PROVENANCE_NAME),
             img_source=args.img_source,
             hbb_dir=hbb_dir,
             model=args.model,
@@ -451,6 +522,7 @@ def main_hbb2obb_detect():
             classes=args.classes if args.classes is not None else spec.classes,
             merged_with=args.merge_with,
             model_kwargs=args.model_kwargs,
+            device=args.device,
         )
 
 
@@ -541,12 +613,30 @@ def main_hbb2obb_convert():
     parser.add_argument(
         "--difficult_from",
         type=str,
-        choices=["dota", "voc"],
+        choices=["dota", "voc", "confidence"],
         help=(
             "Take the per-box 'difficult' flag from this format in the source directory. Only DOTA "
             "and Pascal VOC can carry it, so writing either one from YOLO or COCO resets it to 0 "
-            "unless this is given."
+            "unless this is given. 'confidence' instead derives it from the per-box conversion "
+            "score, flagging everything below --difficult_below; the scores come from the source "
+            "labels if they carry a trailing column, otherwise from --confidence_dir."
         ),
+    )
+    parser.add_argument(
+        "--confidence_dir",
+        metavar="DIR",
+        type=Path,
+        help=(
+            "Side-car directory of per-box confidence scores, as written by 'hbb2obb --confidence_dir'. "
+            "Read only by --difficult_from confidence; the scores stay out of the written labels."
+        ),
+    )
+    parser.add_argument(
+        "--difficult_below",
+        type=float,
+        default=0.5,
+        help="With --difficult_from confidence, flag every box scoring below this (default: 0.5). "
+        "A box that fell back to its source HBB scores 0.0 and is therefore always flagged",
     )
     parser.add_argument(
         "--voc_database", type=str, default="Unknown", help="Value of the <database> field in Pascal VOC output"
@@ -593,7 +683,31 @@ def main_hbb2obb_convert():
         f"from {args.source} ({src_format})"
     )
 
-    if args.difficult_from:
+    if args.confidence_dir and args.difficult_from != "confidence":
+        raise SystemExit(
+            "--confidence_dir is read only by --difficult_from confidence, which is what turns the "
+            "scores into a per-box flag; without it the scores would go nowhere, since no output "
+            "format takes them from a side-car"
+        )
+
+    if args.difficult_from == "confidence":
+        if args.confidence_dir:
+            scores = formats.read_confidences(args.confidence_dir)
+        elif all(b.score is not None for f in frames for b in f.boxes) and formats.count_boxes(frames):
+            # Every box, not merely some: a set that mixes scored and unscored lines has no score
+            # to compare for the unscored ones, and guessing one would flag or spare them silently.
+            scores = {f.stem: [b.score for b in f.boxes] for f in frames}
+        else:
+            raise SystemExit(
+                "--difficult_from confidence found no scores: not every box in the source labels "
+                "carries a confidence column, so pass --confidence_dir with the side-car directory"
+            )
+        try:
+            n = formats.apply_difficult_from_confidence(frames, scores, args.difficult_below)
+        except ValueError as exc:
+            raise SystemExit(f"--difficult_from confidence: {exc}") from exc
+        print(f"Flagged {n} box(es) difficult, scoring below {args.difficult_below:g}")
+    elif args.difficult_from:
         source = args.source if args.source.is_dir() else args.source.parent
         flagged, _, _ = formats.read_set(source, args.difficult_from, names, sizes, default_size)
         print(f"Carried {formats.apply_difficult(frames, flagged)} difficult flag(s) from {args.difficult_from}")
@@ -624,7 +738,7 @@ def run_verify(args) -> int:
 
     A directory holding label files is checked on its own; a directory of label directories is
     checked one subdirectory at a time, pairing ``labels_<name>/`` with a ``coco_annotations_
-    <name>.json`` beside it, which is the layout both the sample data and Songdo Vision+ use.
+    <name>.json`` beside it, which is the layout both the sample data and Songdo Vision OBB use.
     """
     from hbb2obb import formats
 
@@ -634,10 +748,19 @@ def run_verify(args) -> int:
         targets.append((root, None))
     else:
         for sub in sorted(p for p in root.iterdir() if p.is_dir()):
-            if not any(sub.iterdir()):
+            if not any(sub.iterdir()) or sub.name in formats.SIDECAR_DIRS:
                 continue
-            coco = root / f"coco_annotations_{sub.name.removeprefix('labels_')}.json"
-            targets.append((sub, coco if coco.is_file() else None))
+            # labels_<name>/ pairs with coco_annotations_<name>.json; a directory called plainly
+            # labels/, as a published images/ + labels/ release uses, pairs with
+            # coco_annotations.json. Any other directory is checked on its own, with no COCO
+            # counterpart, so that images/ is not paired with the labels' own file.
+            if sub.name == "labels":
+                coco = root / "coco_annotations.json"
+            elif sub.name.startswith("labels_"):
+                coco = root / f"coco_annotations_{sub.name[len('labels_') :]}.json"
+            else:
+                coco = None
+            targets.append((sub, coco if coco is not None and coco.is_file() else None))
     if not targets:
         print(f"No annotation files found under {root}")
         return 1
@@ -739,6 +862,13 @@ def main_hbb2obb_view():
     parser.add_argument(
         "--show_confidence", action="store_true", help="Color the OBBs by confidence and print the score"
     )
+    parser.add_argument(
+        "--confidence_dir",
+        "-cd",
+        type=Path,
+        help="Side-car directory of confidence scores, for labels that carry no confidence column "
+        "(default: img_source/../labels_confidence)",
+    )
     parser.add_argument("--window", type=str, default="1600x900", help="Window size as WxH (default: 1600x900)")
 
     args = parser.parse_args()
@@ -752,7 +882,9 @@ def main_hbb2obb_view():
         raise SystemExit(f"No images found in {args.img_source}")
     root = args.img_source if args.img_source.is_dir() else args.img_source.parent
 
-    obb_dir = args.obb_dir or _first_existing(root.parent, "labels_obb", "labels_obb_gt")
+    # hbb2obb's own output first, then a hand-drawn reference, then the plain labels/ of an
+    # images/ + labels/ release, which is what a published OBB dataset usually looks like.
+    obb_dir = args.obb_dir or _first_existing(root.parent, "labels_obb", "labels_obb_gt", "labels")
     hbb_dir = args.hbb_dir or _first_existing(root.parent, "labels_hbb")
     polygon_dir = args.polygon_dir or _first_existing(root.parent, "labels_polygon")
     names = resolve_names(args.map_path, obb_dir or root, [])
@@ -774,7 +906,26 @@ def main_hbb2obb_view():
     if not obb and not hbb:
         raise SystemExit(f"No annotations found next to {args.img_source}; pass --obb_dir or --hbb_dir")
     if args.show_confidence and not any(b.score is not None for boxes in obb.values() for b in boxes):
-        print(f"Warning: no confidence scores in {obb_dir}; re-run hbb2obb with --save_confidence")
+        # A release that keeps its label files standard puts the scores in their own directory, so
+        # look there before telling the reader the annotations have none.
+        from hbb2obb.formats import read_confidences
+
+        confidence_dir = args.confidence_dir or _first_existing(root.parent, "labels_confidence")
+        scores = read_confidences(confidence_dir) if confidence_dir else {}
+        attached = 0
+        for stem, boxes in obb.items():
+            row = scores.get(stem)
+            if row is not None and len(row) == len(boxes):
+                for box, score in zip(boxes, row):
+                    box.score = score
+                attached += len(boxes)
+        if attached:
+            print(f"Read {attached} confidence score(s) from {confidence_dir}")
+        else:
+            print(
+                f"Warning: no confidence scores in {obb_dir}; re-run hbb2obb with --save_confidence, "
+                "or point --confidence_dir at a side-car directory"
+            )
     if not names:
         seen = [b.cls for boxes in obb.values() for b in boxes]
         names = [f"{i}" for i in range(1 + max(seen, default=-1))]
@@ -1012,6 +1163,14 @@ def main_hbb2obb_optimize():
     )
 
     parser.add_argument(
+        "--device",
+        type=str,
+        help=(
+            "Inference device for the SAM model(s), e.g. 'cpu', '0', 'cuda:0', 'mps'. Applies to "
+            "every run, overriding any 'device' set in the config (default: ultralytics picks)"
+        ),
+    )
+    parser.add_argument(
         "--model_kwargs",
         "-k",
         type=str,
@@ -1042,6 +1201,8 @@ def main_hbb2obb_optimize():
         )
         config_text = args.config.read_text(encoding="utf-8")
         command = f"hbb2obb-optimize -c {args.config}"
+        if args.device:
+            command += f" --device {args.device}"
     else:
         if args.img_source is None or args.gt_dir is None:
             parser.error("img_source and gt_dir are required unless --config is given")
@@ -1066,6 +1227,7 @@ def main_hbb2obb_optimize():
                 img_width=args.img_width,
                 img_height=args.img_height,
                 model_kwargs=args.model_kwargs,
+                device=args.device,
             )
         ]
         img_source = args.img_source
@@ -1090,7 +1252,14 @@ def main_hbb2obb_optimize():
                 "--run_name",
                 spec.name,
             ]
+            + (["--device", args.device] if args.device else [])
         )
+
+    # A --device on the command line applies to every run, benchmark configs included: the same
+    # sweep is run on whatever machine is free, and the config should not have to be edited for it.
+    if args.device:
+        for s in specs:
+            s.device = args.device
 
     if args.only:
         known = {s.name for s in specs}
@@ -1100,7 +1269,6 @@ def main_hbb2obb_optimize():
         specs = [s for s in specs if s.name in args.only]
 
     hbb_dir = get_hbb_dir(img_source, hbb_dir)
-    output_folder.mkdir(parents=True, exist_ok=True)
 
     if args.dry_run or args.refresh:
         pass
@@ -1123,7 +1291,13 @@ def main_hbb2obb_optimize():
     print(f"Total          : {total_points} conversions of the whole image set")
 
     if args.dry_run:
+        # A dry run says what would happen and touches nothing, so the output folder is created
+        # only below. Otherwise a typo in output_folder leaves a stray empty directory behind,
+        # which is exactly what someone checking their config before an unattended sweep does not
+        # want to have to notice.
         return
+
+    output_folder.mkdir(parents=True, exist_ok=True)
 
     started = time.time()
     swept, skipped = [], []

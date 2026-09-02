@@ -63,6 +63,7 @@ RUN_KEYS = {
     "img_width",
     "img_height",
     "model_kwargs",
+    "device",
 }
 
 
@@ -83,6 +84,7 @@ class RunSpec:
     img_width: Optional[int] = None
     img_height: Optional[int] = None
     model_kwargs: Optional[str] = None
+    device: Optional[str] = None
 
     @property
     def grid(self) -> List[tuple]:
@@ -253,6 +255,7 @@ def sweep(
                         scale_factors=sf,
                         opening_kernel_percentage=ok,
                         model_kwargs=model_kwargs,
+                        device=spec.device,
                     )
                 except ValueError as e:
                     print(f"Warning: skipping {img_path.name}: {e}")
@@ -328,6 +331,7 @@ def run_config_dict(spec: RunSpec, img_source: Path, gt_dir: Path, hbb_dir: Path
         "iou_threshold": spec.iou_threshold,
         "class_agnostic": spec.class_agnostic,
         "model_kwargs": spec.model_kwargs,
+        "device": spec.device,
     }
     config["system_metadata"] = get_system_metadata()
     return config

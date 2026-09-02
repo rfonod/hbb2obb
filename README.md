@@ -27,7 +27,7 @@
 - **Segmentation-based**: uses state-of-the-art SAM models for accurate object boundary detection.
 - **Multiple model support**: SAM, SAM2, SAM2.1, SAM3, Mobile SAM, and FastSAM families ([details](https://docs.ultralytics.com/models/sam/)).
 - **Model ensemble**: combine multiple models via majority voting for enhanced accuracy.
-- **Confidence scoring**: a per-OBB quality score flags fallbacks and low-confidence conversions for triage, optionally combined with the detector confidence from the input ([details](#confidence-scores)).
+- **Confidence scoring**: a per-OBB quality score flags fallbacks and low-confidence conversions for triage, optionally combined with the detector confidence from the input, written as an extra column or to a side-car directory that leaves the label files standard ([details](#confidence-scores)).
 - **Polygon output**: optionally save the segmentation contour behind each OBB, row-aligned with the OBB file, as a tighter object outline for downstream masking ([details](#data-format)).
 - **Evaluation tools**: assess OBB accuracy against ground truth using IoU metrics.
 - **Hyperparameter optimization**: search SAM inference resolutions, HBB scale factors and opening kernels for the best settings on your data, one sweep at a time or a whole benchmark from a config file.
@@ -184,7 +184,9 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--scale_factors` / `-sf`: factor(s) to scale HBBs (single value, or two values for short/long sides).
 - `--opening_kernel_percentage` / `-okp`: morphological opening kernel size as a percentage of the mask's smaller dimension.
 - `--save_confidence`: append a per-OBB [confidence score](#confidence-scores) as a 10th column in the output TXT files.
+- `--confidence_dir` / `-cd`: write those scores to their own directory instead, one score per line, row-aligned with the labels. Use it when the label files have to stay strictly standard, since Ultralytics and other YOLO OBB readers reject a 10th column. Give it bare for `img_source/../labels_confidence`.
 - `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
+- `--device`: inference device for the SAM model(s), e.g. `cpu`, `0`, `cuda:0`, `mps` (default: Ultralytics picks).
 - `--model_kwargs` / `-k`: extra Ultralytics inference kwargs as `key1=value1,key2=value2`.
 
 Key evaluation arguments:
@@ -308,7 +310,7 @@ hbb2obb /path/to/images --save_confidence --confidence_source combined
 <details>
 <summary><b>More about <code>--model</code>, class maps, and merging with hand-drawn boxes</b></summary>
 
-`--model` takes a registered detector ([`geotrax`](https://github.com/rfonod/geo-trax) today, the default), any Ultralytics model name or `.pt` path, or a Hugging Face reference written as `<user>/<repo>/<file>.pt`. All three parts are required, even when the repo holds only one file: Hugging Face's download API always names the exact file rather than picking one for you. Weights land in `models/` beside the SAM checkpoints. A registered detector brings the settings it was validated at, so `geotrax` runs at `--imgsz 1920` over its four reliable classes; anything else starts from the Ultralytics defaults and is yours to set. A detector trained on COCO numbers its classes differently from yours, which is what `--class_map` is for: `--class_map '2=0,5=1,7=2,3=3'` turns COCO's car, bus, truck and motorcycle into `0,1,2,3` and drops every other class.
+`--model` takes a registered detector ([`geotrax`](https://github.com/rfonod/geo-trax) today, the default), any Ultralytics model name or `.pt` path, or a Hugging Face reference written as `<user>/<repo>/<file>.pt`. All three parts are required, even when the repo holds only one file. Weights land in `models/` beside the SAM checkpoints. A registered detector brings the settings it was validated at: `geotrax` runs at `--imgsz 1920` over its four reliable classes, while anything else starts from the Ultralytics defaults. `--class_map` renumbers a detector's classes to yours: `--class_map '2=0,5=1,7=2,3=3'` turns COCO's car, bus, truck and motorcycle into `0,1,2,3` and drops every other class.
 
 Detected boxes are a starting point, not ground truth. If you have hand-drawn boxes already and only want the confidence a detector would give them, `--merge_with` keeps your geometry untouched and only attaches the score of the detection covering each box:
 
@@ -316,13 +318,13 @@ Detected boxes are a starting point, not ground truth. If you have hand-drawn bo
 hbb2obb-detect /path/to/images --merge_with /path/to/labels_hbb --extras_dir /tmp/extras --overwrite
 ```
 
-Your boxes stay exactly as they are, in their own order; a box no detection covers keeps `1.0`, because a box somebody drew by hand is not less certain than one a model proposed. Detections that back no box of yours are counted and, with `--extras_dir`, written as their own set so you can look at them (`hbb2obb-view /path/to/images --hbb_dir /tmp/extras`) and decide whether they are objects you missed. The merge never adds them for you, and `--overwrite` is required before anything writes into a directory that already holds labels.
+Your boxes stay exactly as they are, in their own order; a box no detection covers keeps `1.0`. Detections that back no box of yours are counted and, with `--extras_dir`, written as their own set to review (`hbb2obb-view /path/to/images --hbb_dir /tmp/extras`); the merge never adds them for you. `--overwrite` is required before anything writes into a directory that already holds labels.
 
 </details>
 
 ## Inspecting Annotations
 
-`hbb2obb-view` opens your annotations over the images they belong to. A vehicle in a 4K aerial frame is forty pixels across, and whether its box is correctly oriented is simply not visible at fit-to-screen scale, so the window pans and zooms:
+`hbb2obb-view` opens your annotations over the images they belong to, in a window that pans and zooms:
 
 ```bash
 # Defaults: images in <dir>, boxes from ../labels_obb and ../labels_hbb
@@ -344,7 +346,7 @@ hbb2obb-view data/images -o /path/to/annotated
 <details>
 <summary><b>Color legend and keyboard shortcuts</b></summary>
 
-Green is the OBB, white its source HBB, red the segmentation polygon it was fitted to, orange a box flagged `difficult`; with `--show_confidence` the OBB is tinted green→red by score, the same gradient `--save_img` uses. The last two need the conversion to have been run with `--save_polygon` and `--save_confidence`, which is how the sample data in `data/` was produced (see [`data/README.md`](data/README.md) for the exact commands behind every file there).
+Green is the OBB, white its source HBB, red the segmentation polygon it was fitted to, orange a box flagged `difficult`; with `--show_confidence` the OBB is tinted green→red by score, the same gradient `--save_img` uses. The last two need the conversion to have been run with `--save_polygon` and `--save_confidence`, as the sample data in `data/` was (see [`data/README.md`](data/README.md) for the commands behind every file there). Labels with no confidence column still color by score when the scores sit in a side-car directory: the viewer reads `labels_confidence/` beside them, or wherever `--confidence_dir` points.
 
 | Key | | Key | |
 | :--- | :--- | :--- | :--- |
@@ -355,7 +357,7 @@ Green is the OBB, white its source HBB, red the segmentation polygon it was fitt
 | `1` | zoom to 100% | `g` | show or hide the segmentation polygons |
 | `s` | save the current view | `x` | cycle the comparison overlay |
 
-Drag with the left mouse button to pan. `--crops` writes a contact sheet of the individual objects instead, which is the faster way to review a whole frame box by box.
+Drag with the left mouse button to pan. `--crops` writes a contact sheet of the individual objects instead.
 
 </details>
 
@@ -385,11 +387,11 @@ hbb2obb-convert /path/to/dataset --verify -mp label_map.yaml
 <details>
 <summary><b>Format details and edge cases</b></summary>
 
-`--verify` compares the formats by exact equality after rounding rather than by a tolerance, because they are all one common rounding of a single canonical source. That is the property worth testing: rounding full precision and rounding an already-rounded canonical disagree wherever a coordinate lands on a half pixel, and an envelope then silently stops matching the box it was derived from.
+`--verify` compares the formats by exact equality after rounding, not by a tolerance: every format is one rounding of a single canonical source, so any disagreement is a real one.
 
-Only DOTA and Pascal VOC can express a per-box `difficult` flag, so writing either one from YOLO or COCO resets it; `--difficult_from dota` carries the flags across. Only YOLO and COCO can carry a confidence, so DOTA and Pascal VOC drop it. Image dimensions come from `--images`, or from `--img_width` / `--img_height`, and are needed to denormalize relative YOLO coordinates. LabelMe stores class names rather than ids, so pass `-mp` when round-tripping through it to pin the ids.
+Only DOTA and Pascal VOC can express a per-box `difficult` flag, so writing either one from YOLO or COCO resets it; `--difficult_from dota` carries the flags across. `--difficult_from confidence` instead derives the flag from the conversion score, flagging everything below `--difficult_below` (fallback boxes score 0.0, so they are always flagged); the scores come from a trailing column on the source labels, or from `--confidence_dir` when the labels are standard ones with the scores in a side-car. The scores themselves stay out of the output. Only YOLO and COCO can carry a confidence, so DOTA and Pascal VOC drop it. Image dimensions come from `--images`, or from `--img_width` / `--img_height`, and are needed to denormalize relative YOLO coordinates. LabelMe stores class names rather than ids, so pass `-mp` when round-tripping through it to pin the ids.
 
-A COCO file is named `coco_annotations_<kind>.json` unless `--coco_name` says otherwise, which is also how `--verify` pairs one with its directory: `labels_<name>/` goes with `coco_annotations_<name>.json` beside it. Where a directory holds the canonical YOLO files next to derived ones, `--from` is detected as `yolo`, so a second pass through the converter never rounds an already rounded file.
+A COCO file is named `coco_annotations_<kind>.json` unless `--coco_name` says otherwise, which is also how `--verify` pairs one with its directory: `labels_<name>/` goes with `coco_annotations_<name>.json` beside it. Where a directory holds the canonical YOLO files next to derived ones, `--from` is detected as `yolo`.
 
 </details>
 
@@ -411,13 +413,15 @@ The grid is the full product of `--imgsz` x `--scale_factors` x `--opening_kerne
 hbb2obb-optimize /path/to/images /path/to/ground_truth -iz 960 1280 -sf 0.03 0.05 0.07 -ok 0.0 0.15 0.3
 ```
 
-A run writes `run_config.yaml`, `results.yaml`, `summary.txt` and `plot.png` into `<output_folder>/<name>`, and `summary.md`, `comparison.png` and `PROVENANCE.txt` into the output folder itself. The plot colours each series by image size and, when more than one opening kernel was swept, distinguishes the kernels by marker shape.
+A run writes `run_config.yaml`, `results.yaml`, `summary.txt` and `plot.png` into `<output_folder>/<name>`, and `summary.md`, `comparison.png` and `PROVENANCE.txt` into the output folder itself. The plot gives each series a hue by image size and, when more than one opening kernel was swept, a lightness of that hue and a marker shape by kernel, so no two of the swept combinations share a colour. Marker area is the execution time.
+
+`--device` (e.g. `cpu`, `0`, `cuda:0`, `mps`) applies to every run and overrides any `device` set in the config.
 
 </details>
 
 ### Comparing Several Sweeps
 
-Comparing model ensembles means running the same grid many times, which is a job for a file rather than for shell history. A YAML lists the runs, and one command produces all of them:
+A YAML lists the runs, and one command produces all of them:
 
 ```bash
 hbb2obb-optimize -c benchmark.yaml             # all runs in benchmark.yaml
@@ -448,31 +452,31 @@ hbb2obb-optimize -c benchmark.yaml --dry_run   # the runs, the grid size, the to
 hbb2obb-optimize -c benchmark.yaml --refresh   # only redraw the plots and the summary
 ```
 
-Each run takes the `defaults` and overrides whatever it names; a run with no `name` takes one from its models, so `[sam_l, sam_b]` writes into `sam_l-sam_b`. Alongside `summary.md` and `PROVENANCE.txt`, which every sweep writes, a config-driven benchmark also leaves a **copy of the configuration itself** in the output folder, so the results re-run on their own once they have been moved into an archive or a dataset release, away from the repository that held the original. `--resume` skips runs that already hold a complete grid, which is what makes a multi-hour unattended sweep restartable; when it does skip some, `PROVENANCE.txt` says which runs this invocation measured and which it kept, so a partially resumed benchmark is legible as one. `--refresh` redraws the plots and the summary from the results on disk and rewrites no provenance at all, since that file describes the code and the checkpoints that produced the numbers, not the code that last redrew them.
+Each run takes the `defaults` and overrides whatever it names; a run with no `name` takes one from its models, so `[sam_l, sam_b]` writes into `sam_l-sam_b`. Every sweep writes `summary.md` and `PROVENANCE.txt`, and a config-driven benchmark also leaves a **copy of the configuration** in the output folder, so the results re-run on their own from wherever they end up. `--resume` skips runs that already hold a complete grid, and `PROVENANCE.txt` then names the runs this invocation measured and the ones it kept. `--refresh` redraws the plots and the summary from the results on disk and rewrites no provenance.
 
-[`data/benchmark.yaml`](data/benchmark.yaml) is a working example: it is the file behind [`data/benchmark_results/`](data/benchmark_results/), so that whole folder is one command away.
+[`data/benchmark.yaml`](data/benchmark.yaml) is a working example: it is the file behind [`data/benchmark_results/`](data/benchmark_results/).
 
 </details>
 
 ### Recording Provenance
 
-`--save_provenance` writes a `PROVENANCE.txt` beside the annotations, so a release can be regenerated rather than taken on trust:
+`--save_provenance` records what a run actually did, so a release can be regenerated rather than taken on trust. The file lands one level above the label directory: `--obb_dir train/labels` leaves `train/PROVENANCE.txt`. `hbb2obb-detect` writes `PROVENANCE_hbb.txt` there instead, and `hbb2obb-optimize` writes `PROVENANCE.txt` inside its output folder.
 
 ```bash
 hbb2obb /path/to/images --sam_models sam_l sam_b sam2_b sam2.1_b --save_confidence --save_provenance
 ```
 
 <details>
-<summary><b>What gets recorded, and why a commit hash is not enough</b></summary>
+<summary><b>What gets recorded</b></summary>
 
 ```bash
 # Works the same for detection
 hbb2obb-detect /path/to/images --save_provenance
 ```
 
-It records the exact command, the versions of `ultralytics`, `torch`, OpenCV, NumPy, Shapely and matplotlib, and the **SHA-256 of every checkpoint used**. That last part is the one worth insisting on: `ultralytics` resolves a bare model name by downloading it, and the file behind a name can change between asset releases, so the name alone does not pin the model that actually ran. The settings come from the run that happened rather than from arguments repeated afterwards, and a benchmark additionally hashes the label sets its numbers were measured against.
+The record holds the exact command, the settings the run used, the versions of `ultralytics`, `torch`, OpenCV, NumPy, Shapely and matplotlib, and the **SHA-256 of every checkpoint used**. A benchmark also hashes the label sets its numbers were measured against.
 
-The code is pinned three ways, because a commit hash alone is not enough: the release (`pip install hbb2obb==<version>`), the commit with `git describe` when there is a checkout, and a **SHA-256 over the package source**. The record says outright whether that commit can be checked out to get the code that ran, and it decides that by comparing the package directory alone, so a sweep writing its results back into the repository does not mark its own record as untrustworthy. The digest is the durable one. A commit hash identifies a point in a history, and history is editable: squash a branch, rebase it, or delete it after the merge, and the hash stops resolving, while an uncommitted tree never had one to record. The source digest is computed from the bytes that ran, so it still matches years later. Use the commit to find the change; use the digest to prove you have the same code.
+The code is pinned three ways: the release version, the commit with `git describe` when there is a checkout, and a **SHA-256 over the package source**. The record states whether that commit can be checked out to get the code that ran, judging by the package directory alone. Use the commit to find the change; use the digest to prove you have the same code.
 
 </details>
 
@@ -484,13 +488,13 @@ The code is pinned three ways, because a commit hash alone is not enough: the re
 class_id x_center y_center width height
 ```
 
-An optional 6th column holding the detector confidence is accepted and can be carried into the output (see [Confidence scores](#confidence-scores)), which is the shape most detectors write:
+An optional 6th column holds the detector confidence and can be carried into the output (see [Confidence scores](#confidence-scores)):
 
 ```text
 class_id x_center y_center width height confidence
 ```
 
-Blank lines are skipped, and an empty label file (a frame with no objects) is valid input: it simply produces an empty output file, so a whole directory converts without interruption.
+Blank lines are skipped, and an empty label file (a frame with no objects) is valid input and produces an empty output file.
 
 You bring your own HBB annotations. If you don't have any, `hbb2obb-detect` produces them with an Ultralytics detector and writes this exact format, confidence column included (see [Detecting HBBs](#detecting-hbbs)).
 
@@ -520,7 +524,7 @@ With `--save_confidence`, a trailing column holds the same per-object score writ
 class_id x1 y1 x2 y2 ... xN yN confidence
 ```
 
-The polygon is a tighter outline of the object than its OBB, which makes it useful as a mask for downstream work. It is row-aligned with the OBB file: line *i* of both files describes the same object, so the two can be joined by line number. Objects that fell back to the HBB are written as a four-point rectangle identical to their OBB line rather than skipped, which is what keeps that alignment exact. `--polygon_epsilon` simplifies the polygons, the value being a fraction of the contour perimeter (`0.01` typically drops about 90% of the vertices); the default `0` writes the raw contour.
+The polygon is a tighter outline of the object than its OBB, useful as a mask for downstream work. It is row-aligned with the OBB file: line *i* of both files describes the same object. Objects that fell back to the HBB are written as a four-point rectangle identical to their OBB line, never skipped. `--polygon_epsilon` simplifies the polygons, the value being a fraction of the contour perimeter (`0.01` typically drops about 90% of the vertices); the default `0` writes the raw contour.
 
 **Label map (optional)**: YAML mapping class IDs to names:
 
@@ -575,13 +579,13 @@ Enable it with `--save_confidence` (writes a 10th column to each output file). I
 | `detector` | the detector confidence read from the HBB input |
 | `combined` | the product of the two |
 
-The two measure different things: `conversion` says how well the OBB fits the segmented shape, `detector` says how sure the detector was that there is an object there at all. Boxes whose input line carried no confidence column fall back to the conversion score, so no output is ever left without one.
+`conversion` says how well the OBB fits the segmented shape, `detector` how sure the detector was that there is an object at all. Boxes whose input line carried no confidence column fall back to the conversion score, so no output is left without one.
 
-`hbb2obb-detect` writes that 6th column, either for boxes it found itself or, with `--merge_with`, for boxes you drew by hand (see [Detecting HBBs](#detecting-hbbs)). The sample HBBs in `data/` are detector output and carry it, so all three sources can be tried there directly; the OBBs shipped in `data/labels_obb/` are scored `combined`.
+`hbb2obb-detect` writes that 6th column, for boxes it found itself or, with `--merge_with`, for boxes you drew by hand (see [Detecting HBBs](#detecting-hbbs)). The sample HBBs in `data/` are detector output and carry it; the OBBs in `data/labels_obb/` are scored `combined`.
 
 ## Best Practices
 
-- For optimal results, combine multiple SAM models of comparable strength, e.g. `--sam_models sam_b sam_l sam2_b sam2.1_b`. Adding a weaker model is not free: with majority voting, two weak members can outvote a strong one, so measure rather than assume.
+- For optimal results, combine multiple SAM models of comparable strength, e.g. `--sam_models sam_b sam_l sam2_b sam2.1_b`. Adding a weaker model is not free: under majority voting, two weak members can outvote a strong one.
 - Experiment with scale factors and inference resolutions based on your dataset.
 - Run `hbb2obb-optimize` to find the best settings for your data, and `--save_provenance` to record the ones you settled on.
 - Use class-agnostic evaluation when comparing against manually annotated ground truth with different class labels.

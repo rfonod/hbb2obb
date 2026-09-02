@@ -4,10 +4,11 @@
 """
 Plots for the hyperparameter sweeps produced by ``hbb2obb.optimizer``.
 
-``run_plot`` renders one sweep: average IoU against the scale factor, with the colour encoding
+``run_plot`` renders one sweep: average IoU against the scale factor, with the hue encoding
 the inference image size and, when the run swept more than one morphological opening kernel,
-the marker shape encoding the kernel. Marker area encodes the execution time, so the accuracy
-and the cost of a grid point are readable at once.
+the lightness of that hue and the marker shape encoding the kernel, so no two of the swept
+combinations share a colour. Marker area encodes the execution time, so the accuracy and the
+cost of a grid point are readable at once.
 
 ``comparison_plot`` renders a whole benchmark: one point per run, its best IoU against what
 that point cost, which is the accuracy-versus-compute trade-off the per-run plots cannot show.
@@ -17,6 +18,7 @@ Both are called by ``hbb2obb-optimize``; there is no separate plotting command.
 
 from __future__ import annotations
 
+import colorsys
 import os
 from pathlib import Path
 from typing import Optional, Sequence
@@ -25,6 +27,7 @@ import matplotlib
 
 matplotlib.use("Agg")  # a sweep writes files, and a workstation run has no display
 
+import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import yaml  # noqa: E402
@@ -33,6 +36,10 @@ from matplotlib.ticker import FixedLocator, NullLocator, ScalarFormatter  # noqa
 
 COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 MARKERS = ['s', '^', 'o', 'D', 'P', '*', 'X']
+
+# The lightness a kernel ladder runs between, lightest kernel first. Kept clear of both ends so
+# no shade washes out against the white ground or goes dark enough to lose its hue.
+SHADE_RANGE = (0.70, 0.30)
 
 
 def load_results(benchmark_dir: Path) -> dict:
@@ -95,6 +102,41 @@ def series_label(imgsz: int, kernel: Optional[float], multiple_kernels: bool) ->
     return f"{imgsz}px, k={kernel:g}" if multiple_kernels else f"{imgsz}px"
 
 
+def shade(color: str, position: float) -> tuple:
+    """
+    Lighten or darken a base colour, ``position`` 0.0 lightest to 1.0 darkest.
+
+    Hue carries the image size and lightness the opening kernel, so a sweep over both axes gives
+    every combination a colour of its own while the reader still reads the two axes out of it
+    separately. Marker shape says the same thing as lightness, for a reader who cannot rely on
+    the colour. Without this, every kernel at one image size drew in one colour and their lines
+    and error bars overprinted each other.
+    """
+    hue, _, saturation = colorsys.rgb_to_hls(*mcolors.to_rgb(color))
+    lightest, darkest = SHADE_RANGE
+    return colorsys.hls_to_rgb(hue, lightest + (darkest - lightest) * position, min(1.0, saturation * 1.10))
+
+
+def ladder_position(index: int, count: int) -> float:
+    """Where the ``index``-th of ``count`` kernels sits on the lightness ladder."""
+    return index / (count - 1) if count > 1 else 0.5
+
+
+def legend_handle(marker: str, color, label: str) -> Line2D:
+    """A marker-only legend entry, its shape and colour carrying the encoding it stands for."""
+    return Line2D(
+        [0],
+        [0],
+        marker=marker,
+        color='w',
+        markerfacecolor=color,
+        markeredgecolor='black',
+        markeredgewidth=0.5,
+        markersize=10,
+        label=label,
+    )
+
+
 def create_plot(
     data_by_series: dict,
     best_params: dict,
@@ -133,7 +175,9 @@ def create_plot(
     # Plot data for each (image size, opening kernel) series
     for (imgsz, kernel), data in sorted(data_by_series.items(), key=lambda kv: (kv[0][0], kv[0][1] is None, kv[0][1])):
         imgsz_idx = image_sizes.index(imgsz)
-        color = colors[imgsz_idx % len(colors)]
+        base = colors[imgsz_idx % len(colors)]
+        # With a single kernel there is no ladder to walk, so the base colour is used untouched
+        color = shade(base, ladder_position(kernels.index(kernel), len(kernels))) if multiple_kernels else base
         # With a single kernel the marker keeps cycling with the image size, as it always has
         marker = markers[(kernels.index(kernel) if multiple_kernels else imgsz_idx) % len(markers)]
         label = series_label(imgsz, kernel, multiple_kernels)
@@ -255,9 +299,30 @@ def create_plot(
     )
 
     # Add legend for image sizes
-    legend_title = "Image Size / Kernel" if multiple_kernels else "Image Size"
-    legend1 = plt.legend(handles=legend_elements, loc='best', title=legend_title)
-    plt.gca().add_artist(legend1)
+    if multiple_kernels:
+        # One entry per series is nine rows of "640px, k=0.05" that matplotlib can only park on
+        # top of the data, so the two encodings are legended apart into two short blocks: hues
+        # for the image size, a grey lightness ladder for the kernel. Fixed corners rather than
+        # 'best', which places each legend without knowing where the other one went.
+        imgsz_handles = [
+            legend_handle('o', shade(colors[i % len(colors)], 0.5), f"{imgsz}px") for i, imgsz in enumerate(image_sizes)
+        ]
+        kernel_handles = [
+            legend_handle(
+                markers[i % len(markers)],
+                shade('#8a8a8a', ladder_position(i, len(kernels))),
+                f"k={kernel:g}" if kernel is not None else "k=default",
+            )
+            for i, kernel in enumerate(kernels)
+        ]
+        legend1 = plt.legend(handles=imgsz_handles, loc='upper left', title="Image Size", framealpha=0.7)
+        plt.gca().add_artist(legend1)
+        plt.gca().add_artist(
+            plt.legend(handles=kernel_handles, loc='center right', title="Opening Kernel", framealpha=0.7)
+        )
+    else:
+        legend1 = plt.legend(handles=legend_elements, loc='best', title="Image Size")
+        plt.gca().add_artist(legend1)
 
     # Add marker size legend for execution time if requested
     if not no_time:

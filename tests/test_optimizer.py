@@ -96,6 +96,13 @@ def test_a_run_overrides_the_defaults_it_names(tmp_path):
     assert specs[0].scale_factors == [0.04, 0.05]  # the default it did not override
 
 
+def test_expand_runs_carries_a_device_from_the_defaults(tmp_path):
+    cfg = optimizer.load_config(write_config(tmp_path, defaults={"imgsz": [1280], "device": "cpu"}))
+    specs = optimizer.expand_runs(cfg, SUPPORTED_SAM_MODELS)
+
+    assert all(s.device == "cpu" for s in specs)
+
+
 def test_an_explicit_name_wins_over_the_derived_one(tmp_path):
     cfg = optimizer.load_config(write_config(tmp_path, runs=[{"sam_models": ["sam_b"], "name": "baseline"}]))
     assert optimizer.expand_runs(cfg, SUPPORTED_SAM_MODELS)[0].name == "baseline"
@@ -267,6 +274,9 @@ def test_dry_run_runs_nothing(monkeypatch, tmp_path, capsys, no_sweep):
     out = capsys.readouterr().out
     assert "Total          : 4 conversions" in out
     assert not (tmp_path / "bench" / optimizer.BENCHMARK_SUMMARY_NAME).exists()
+    # It reports what would happen and writes nothing, the output folder included: a typo there
+    # should not leave a stray empty directory behind.
+    assert not (tmp_path / "bench").exists()
 
 
 def test_a_config_run_writes_every_artifact(monkeypatch, tmp_path, no_sweep):
@@ -291,6 +301,23 @@ def test_a_config_run_writes_every_artifact(monkeypatch, tmp_path, no_sweep):
     assert copy.is_file() and copy.read_text() == config.read_text()
     assert f"hbb2obb-optimize -c {copy}" in provenance
     assert config.name in (bench / optimizer.BENCHMARK_SUMMARY_NAME).read_text()
+
+
+def test_cli_device_overrides_every_run(monkeypatch, tmp_path):
+    seen = []
+
+    def fake_sweep(spec, *_args, **_kwargs):
+        seen.append((spec.name, spec.device))
+        return fake_outcome([grid_point(sf=sf) for sf in spec.scale_factors])
+
+    monkeypatch.setattr(optimizer, "sweep", fake_sweep)
+    monkeypatch.setattr("hbb2obb.converter.clear_model_cache", lambda: None)
+
+    config = write_config(tmp_path, defaults={"imgsz": [1280], "scale_factors": [0.05], "device": "0"})
+    run_cli(monkeypatch, "-c", str(config), "--no_plot", "--device", "cpu")
+
+    assert seen == [("sam_b", "cpu"), ("sam_l-sam_b", "cpu")]  # the CLI wins over the config's "0"
+    assert "--device cpu" in (tmp_path / "bench" / optimizer.BENCHMARK_PROVENANCE_NAME).read_text()
 
 
 def test_a_config_inside_the_output_folder_is_not_copied_onto_itself(monkeypatch, tmp_path, no_sweep):

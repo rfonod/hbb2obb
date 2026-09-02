@@ -158,6 +158,25 @@ def test_conversion_provenance_records_the_command_and_the_checkpoints(tmp_path)
     assert "HBB sha256" in text
 
 
+def test_conversion_provenance_records_the_inference_device(tmp_path):
+    out = tmp_path / "PROVENANCE.txt"
+    provenance.write_conversion_provenance(
+        out=out,
+        img_source=None,
+        hbb_dir=None,
+        obb_dir=None,
+        sam_models=["sam_b"],
+        imgsz=1280,
+        scale_factors=[0.05],
+        opening_kernel_percentage=0.15,
+        device="cuda:0",
+        models_dir=tmp_path / "models",
+    )
+    text = out.read_text()
+    assert "--device cuda:0" in text
+    assert "Inference device         : cuda:0" in text
+
+
 def test_conversion_provenance_reports_a_missing_checkpoint(tmp_path):
     out = tmp_path / "PROVENANCE.txt"
     status = provenance.write_conversion_provenance(

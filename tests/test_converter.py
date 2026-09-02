@@ -13,6 +13,7 @@ from hbb2obb.converter import (
     load_sam_model,
     pack_results,
     resolve_confidences,
+    save_confidence_annotations,
     save_obb_annotations,
     save_polygon_annotations,
     scale_bounding_boxes,
@@ -618,5 +619,93 @@ class TestSavePolygonAnnotations(unittest.TestCase):
                 save_polygon_annotations(self.contours[:1], self.obb_annotations, Path(tmp), Path(tmp) / "sample.jpg")
 
 
+class TestDeviceForwarding(unittest.TestCase):
+    """`hbb2obb(device=...)` must reach the ultralytics inference call."""
+
+    class _FakeResult:
+        masks = None  # no mask -> the box falls back to its HBB, which is all this test needs
+
+    class _FakeModel:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, _img, **kwargs):
+            self.calls.append(kwargs)
+            return [TestDeviceForwarding._FakeResult()]
+
+    def setUp(self):
+        self.model = self._FakeModel()
+        self._orig_loader = converter.load_sam_model
+        converter.load_sam_model = lambda _name: self.model
+
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.img_path = root / "images" / "sample.jpg"
+        self.img_path.parent.mkdir()
+        cv2.imwrite(str(self.img_path), np.zeros((200, 200, 3), np.uint8))
+        self.hbb_dir = root / "labels_hbb"
+        self.hbb_dir.mkdir()
+        (self.hbb_dir / "sample.txt").write_text("0 100 100 40 40\n")
+
+    def tearDown(self):
+        converter.load_sam_model = self._orig_loader
+        self.tmp.cleanup()
+
+    def _run(self, **kwargs):
+        converter.hbb2obb(img_path=self.img_path, hbb_dir=self.hbb_dir, sam_models=["sam_b"], **kwargs)
+        return self.model.calls[0]
+
+    def test_device_is_passed_through(self):
+        self.assertEqual(self._run(device="cpu")["device"], "cpu")
+
+    def test_no_device_leaves_it_unset(self):
+        self.assertNotIn("device", self._run())
+
+    def test_explicit_model_kwargs_device_wins(self):
+        self.assertEqual(self._run(device="cpu", model_kwargs={"device": "0"})["device"], "0")
+
+    def test_a_shared_model_kwargs_dict_is_not_mutated(self):
+        shared = {}
+        self._run(device="cpu", model_kwargs=shared)
+        self.assertEqual(shared, {})
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConfidenceSidecar(unittest.TestCase):
+    """save_confidence_annotations writes the scores beside the labels, not inside them."""
+
+    def test_scores_are_written_one_per_line_and_row_aligned(self):
+        obb_annotations = np.array(
+            [
+                [0, 100, 100, 300, 100, 300, 200, 100, 200],
+                [1, 400, 400, 600, 400, 600, 500, 400, 500],
+            ]
+        )
+        confidences = [0.7321, 0.0]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_path = root / "images" / "sample.jpg"
+            img_path.parent.mkdir()
+
+            save_obb_annotations(obb_annotations, root / "labels_obb", img_path)
+            save_confidence_annotations(confidences, root / "labels_confidence", img_path)
+
+            labels = (root / "labels_obb" / "sample.txt").read_text().splitlines()
+            scores = (root / "labels_confidence" / "sample.txt").read_text().splitlines()
+
+            # The label file keeps its nine standard fields; the scores live next door, row-aligned.
+            self.assertEqual([len(line.split()) for line in labels], [9, 9])
+            self.assertEqual(len(scores), len(labels))
+            self.assertAlmostEqual(float(scores[0]), 0.7321, places=4)
+            self.assertAlmostEqual(float(scores[1]), 0.0, places=4)
+
+    def test_the_directory_defaults_beside_the_images(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            img_path = Path(tmp) / "images" / "sample.jpg"
+            img_path.parent.mkdir()
+            save_confidence_annotations([0.5], None, img_path)
+            self.assertTrue((Path(tmp) / "labels_confidence" / "sample.txt").is_file())

@@ -63,6 +63,7 @@ def hbb2obb(
     show_labels: bool = True,
     show_confidence: bool = False,
     model_kwargs: Dict[str, Any] = None,
+    device: str = None,
     return_confidence: bool = False,
     confidence_source: str = "conversion",
     return_contours: bool = False,
@@ -78,7 +79,8 @@ def hbb2obb(
         scale_factors: Factor(s) to scale HBB bounding boxes.
                      If single value: same factor for both dimensions.
                      If two values: first for shorter side, second for longer side
-        opening_kernel_percentage: Percentage of mask's smaller dimension for morphological opening kernel (0 to disable)
+        opening_kernel_percentage: Percentage of mask's smaller dimension for the morphological
+                     opening kernel (0 to disable)
         save_img: Save visualization images
         viz_dir: Directory to save visualization images
         show_hbb: Show horizontal bounding boxes
@@ -88,6 +90,8 @@ def hbb2obb(
         show_labels: Show class labels
         show_confidence: Print the per-OBB confidence score in the visualization
         model_kwargs: Additional keyword arguments for the SAM model
+        device: Inference device, e.g. 'cpu', '0', 'cuda:0', 'mps' (default: ultralytics picks).
+                     An explicit 'device' in model_kwargs takes precedence.
         return_confidence: If True, also return the per-OBB confidence scores
         confidence_source: Which score the returned confidences carry: 'conversion' (the
                      heuristic conversion-quality score), 'detector' (the confidence read
@@ -124,6 +128,10 @@ def hbb2obb(
 
     if model_kwargs is None:
         model_kwargs = {}
+    if device is not None:
+        # A new dict, so a model_kwargs shared across a directory of images is never mutated;
+        # an explicit device in model_kwargs still wins.
+        model_kwargs = {"device": device, **model_kwargs}
     masks_all_models = []
 
     # Run each model and collect results
@@ -649,6 +657,22 @@ def save_obb_annotations(obb_annotations: np.ndarray, obb_dir: Path, img_path: P
             label, x1, y1, x2, y2, x3, y3, x4, y4 = map(int, obb)
             line = f"{label} {x1} {y1} {x2} {y2} {x3} {y3} {x4} {y4}"
             f.write(format_annotation_line(line, confidences, i) + "\n")
+
+
+def save_confidence_annotations(confidences: List[float], confidence_dir: Path, img_path: Path) -> None:
+    """
+    Save the per-object confidence scores to their own file, one score per line.
+
+    Row-aligned with the OBB file for the same image: line i of both describes the same object.
+    This is the alternative to the 10th column ``save_obb_annotations`` writes, for annotation
+    sets whose label files have to stay strictly standard. Ultralytics, for one, rejects a 10th
+    column on a YOLO OBB label, so a release that wants both a usable label file and a per-box
+    score has to put the score somewhere else.
+    """
+    confidence_dir = resolve_output_dir(confidence_dir, img_path, "labels_confidence")
+    with open(confidence_dir / (img_path.stem + ".txt"), "w", encoding="utf-8") as f:
+        for score in confidences:
+            f.write(f"{score:.4f}\n")
 
 
 def save_polygon_annotations(
