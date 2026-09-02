@@ -235,7 +235,7 @@ def main_hbb2obb():
         save_polygon_annotations,
         unpack_results,
     )
-    from hbb2obb.utils import get_image_paths, get_hbb_dir, process_ultralytics_kwargs
+    from hbb2obb.utils import get_hbb_dir, get_image_paths, process_ultralytics_kwargs
 
     model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
 

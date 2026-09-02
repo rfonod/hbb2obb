@@ -79,7 +79,8 @@ def hbb2obb(
         scale_factors: Factor(s) to scale HBB bounding boxes.
                      If single value: same factor for both dimensions.
                      If two values: first for shorter side, second for longer side
-        opening_kernel_percentage: Percentage of mask's smaller dimension for morphological opening kernel (0 to disable)
+        opening_kernel_percentage: Percentage of mask's smaller dimension for the morphological
+                     opening kernel (0 to disable)
         save_img: Save visualization images
         viz_dir: Directory to save visualization images
         show_hbb: Show horizontal bounding boxes
