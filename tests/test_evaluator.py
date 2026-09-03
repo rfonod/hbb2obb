@@ -8,6 +8,7 @@ from hbb2obb.evaluator import (
     evaluate_obb,
     format_bbox,
     is_edge_box,
+    looks_normalized,
     match_boxes,
     parse_obb_file,
     print_results,
@@ -227,3 +228,58 @@ class TestEndToEnd:
             assert 'total_pred' in results
             assert results['total_gt'] == len(sample_gt_boxes)
             assert results['total_pred'] == len(sample_pred_boxes)
+
+
+class TestCoordinateConvention:
+    """
+    A normalized set scored against an absolute one reports near-zero IoU with nothing visibly
+    wrong, because IoU is affine-invariant and so two normalized sets score exactly as two
+    absolute ones do. Only the mixed case is broken, and it has to announce itself.
+    """
+
+    ABSOLUTE = "0 100 200 300 200 300 400 100 400\n"
+    NORMALIZED = "0 0.026 0.0926 0.0781 0.0926 0.0781 0.1852 0.026 0.1852\n"
+
+    def _run(self, gt_text, pred_text):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            gt_dir, pred_dir = Path(temp_dir) / 'gt', Path(temp_dir) / 'pred'
+            gt_dir.mkdir()
+            pred_dir.mkdir()
+            (gt_dir / 'f.txt').write_text(gt_text)
+            (pred_dir / 'f.txt').write_text(pred_text)
+            return evaluate_obb(gt_dir=gt_dir, pred_dir=pred_dir, iou_threshold=0.1, no_bar=True)
+
+    def test_a_mixed_pair_warns(self, capsys):
+        self._run(self.NORMALIZED, self.ABSOLUTE)
+        assert "normalized" in capsys.readouterr().out
+
+    def test_matching_conventions_do_not_warn(self, capsys):
+        self._run(self.ABSOLUTE, self.ABSOLUTE)
+        assert "normalized" not in capsys.readouterr().out
+
+        self._run(self.NORMALIZED, self.NORMALIZED)
+        assert "normalized" not in capsys.readouterr().out
+
+    def test_both_conventions_score_the_same(self):
+        """IoU is affine-invariant, so normalizing a whole set cannot move the number"""
+        absolute = self._run(self.ABSOLUTE, self.ABSOLUTE)
+        normalized = self._run(self.NORMALIZED, self.NORMALIZED)
+        assert absolute['avg_iou'] == normalized['avg_iou'] == 1.0
+
+    def test_an_empty_frame_says_nothing_either_way(self, capsys):
+        """No boxes is not evidence of a convention, and must not trigger the warning"""
+        self._run("", self.ABSOLUTE)
+        assert "normalized" not in capsys.readouterr().out
+
+
+def test_looks_normalized_reports_none_for_an_empty_frame():
+    assert looks_normalized([]) is None
+    assert looks_normalized(parse_obb_file_from_text("0 0.1 0.1 0.2 0.1 0.2 0.2 0.1 0.2\n")) is True
+    assert looks_normalized(parse_obb_file_from_text("0 10 10 20 10 20 20 10 20\n")) is False
+
+
+def parse_obb_file_from_text(text):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        path = Path(temp_dir) / 'f.txt'
+        path.write_text(text)
+        return parse_obb_file(path)
