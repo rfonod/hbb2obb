@@ -43,8 +43,35 @@ def load_sam_model(model_name: str):
 
 
 def clear_model_cache() -> None:
-    """Clear the in-process SAM/FastSAM model cache, releasing the associated memory."""
+    """
+    Clear the in-process SAM/FastSAM model cache, releasing the associated memory.
+
+    Dropping the last reference frees the weights, but on CUDA the caching allocator keeps the
+    freed blocks reserved, shaped like the checkpoints that just went away. The next ensemble
+    then meets a fragmented heap rather than an empty one, which is what stops a SAM image
+    encoder from allocating the multi-gigabyte contiguous attention tensors it asks for. A
+    benchmark clears the cache between runs precisely so the later, larger runs start clean.
+    """
+    import torch
+
     _MODEL_CACHE.clear()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def release_device_results(model: Any) -> None:
+    """
+    Drop the ultralytics predictor's reference to the last inference's device-side results.
+
+    ``Predictor.stream_inference`` stores the ``Results`` it yields on ``self.results``, and
+    their masks stay on the inference device at full image resolution: one frame of 140 boxes
+    at 3840x2160 is over a gigabyte of bool mask. ``hbb2obb`` copies what it needs to the host
+    straight away, so that reference only pins device memory until the model is next called,
+    and an ensemble holds one such frame per member for as long as it is loaded.
+    """
+    predictor = getattr(model, "predictor", None)
+    if predictor is not None:
+        predictor.results = None
 
 
 def hbb2obb(
@@ -155,6 +182,13 @@ def hbb2obb(
             masks_all_models.append(masks.data)
         else:
             print(f"Warning: Model {model_name} produced no masks for {img_path.name}")
+
+        # The masks now live on the host, so release the device copies before prompting the next
+        # model rather than at the end of the loop: an ensemble sweep keeps every member loaded
+        # at once, and each one holding its last frame's full-resolution masks is several
+        # gigabytes that the next model's image encoder needs for its own attention tensors.
+        del result, results
+        release_device_results(model)
 
     # Convert segmentation masks within HBBs to OBB annotations
     obb_annotations, aggregated_masks, contours, confidences = create_obb_annotations_multi_model(
