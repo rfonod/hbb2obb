@@ -224,7 +224,7 @@ class Viewer:
     that a long review session needs no menus.
     """
 
-    KEYS = "q quit  n/p frame  +/- zoom  f fit  h hbb  l labels  d difficult  c conf  g poly  x cmp  s save"
+    KEYS = "q quit  n/p frame  +/- zoom  f fit  o obb  h hbb  l labels  d difficult  c conf  g poly  x cmp  s save"
 
     def __init__(self, frames, names, win_w=1600, win_h=900, show_hbb=True, show_labels=True):
         self.frames = frames  # list of dicts: path, obb, hbb, cmp, polygons
@@ -232,6 +232,7 @@ class Viewer:
         self.win_w, self.win_h = win_w, win_h
         self.idx = 0
         self.show_hbb = show_hbb
+        self.show_obb = True
         self.show_labels = show_labels
         self.show_difficult = True
         self.show_confidence = False
@@ -299,7 +300,7 @@ class Viewer:
                 offset=offset,
                 casing=True,
             )
-        if self.compare_mode != 2:
+        if self.show_obb and self.compare_mode != 2:
             draw(
                 vis,
                 visible(self.frame["obb"]),
@@ -394,6 +395,8 @@ class Viewer:
                 self.zoom = 1.0
             elif key in (ord("f"), ord("0")):
                 self.fit()
+            elif key == ord("o"):
+                self.show_obb = not self.show_obb
             elif key == ord("h"):
                 self.show_hbb = not self.show_hbb
             elif key == ord("l"):

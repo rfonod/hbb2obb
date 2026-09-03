@@ -301,3 +301,39 @@ def test_the_hbb_is_white_and_the_obb_stays_the_dominant_line():
     viewer.draw(canvas_obb, box, viewer.OBB_COLOR, NAMES, labels=False, thickness=2)
 
     assert (canvas_obb[:, :, 1] > 0).sum() <= (canvas_hbb[:, :, 1] > 0).sum()  # casing widens the HBB band
+
+
+def test_viewer_toggles_each_box_layer_independently(tmp_path):
+    """`o` hides the oriented boxes as `h` hides the horizontal ones, and neither touches the other."""
+    v = _viewer(tmp_path)
+    assert v.show_obb and v.show_hbb, "both layers start visible"
+
+    def drawn(canvas, color):
+        return (canvas == np.array(color, np.uint8)).all(2).any()
+
+    both = v.view()
+    assert drawn(both, viewer.OBB_COLOR) and drawn(both, viewer.HBB_COLOR)
+
+    v.show_obb = False
+    without_obb = v.view()
+    assert not drawn(without_obb, viewer.OBB_COLOR)
+    assert drawn(without_obb, viewer.HBB_COLOR), "hiding the OBBs must leave the HBBs alone"
+
+    v.show_obb, v.show_hbb = True, False
+    without_hbb = v.view()
+    assert drawn(without_hbb, viewer.OBB_COLOR)
+    assert not drawn(without_hbb, viewer.HBB_COLOR)
+
+
+def test_the_key_legend_names_every_layer_toggle(tmp_path):
+    """The status bar is the only place the keys are listed, so a new toggle has to appear there."""
+    import inspect
+    import re
+
+    source = inspect.getsource(viewer)
+    toggles = set(re.findall(r'key == ord\("(\w)"\):\n\s+self\.(?:show_\w+|compare_mode)', source))
+    listed = set(re.findall(r"(?:^|\s)(\w)\s", viewer.Viewer.KEYS))
+
+    assert "o" in toggles, "the OBB layer needs a key of its own"
+    assert toggles <= listed, f"toggles handled but not listed: {sorted(toggles - listed)}"
+    assert "o obb" in viewer.Viewer.KEYS and "h hbb" in viewer.Viewer.KEYS
