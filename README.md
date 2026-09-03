@@ -507,6 +507,8 @@ class_id x1 y1 x2 y2 x3 y3 x4 y4
 
 > Ultralytics requires the normalized form and rejects an absolute label file as corrupt, so pass `--normalize` for output you intend to train on. The default stays absolute, which is the convention DOTA and the wider OBB ecosystem use and what every other format here is derived from.
 
+Normalized coordinates are written at 10 decimals, enough that reading them back lands on the pixel they came from for any frame size. `--precision` sets a shorter one, and warns when the value chosen is too coarse for the frame. Every reader in the toolkit detects the convention from the file, so a normalized set converts, views and evaluates like an absolute one, and a corner that falls outside the frame does not change that.
+
 With `--save_confidence`, a 10th column holds the per-OBB [confidence score](#confidence-scores):
 
 ```text

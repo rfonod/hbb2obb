@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 from ultralytics import SAM, FastSAM
 
+from hbb2obb import formats
 from hbb2obb.utils import Annotations, get_hbb_dir
 
 # Cache of loaded SAM/FastSAM model instances, keyed by the resolved weights path, so that
@@ -15,10 +16,9 @@ from hbb2obb.utils import Annotations, get_hbb_dir
 # instead of reconstructing it from disk on every call.
 _MODEL_CACHE: Dict[str, Any] = {}
 
-# Decimals written for normalized coordinates, matching formats.write_yolo. Ten places put the
-# round-trip error at ~4e-7 px on a 4K frame, far below the half of a hundredth of a pixel that
-# would move an integer format derived from the same box.
-DEFAULT_NORMALIZED_PRECISION = 10
+# Re-exported so that the conversion writers and formats.write_yolo cannot drift apart, and so a
+# caller reaching for it need not know which module owns it.
+DEFAULT_NORMALIZED_PRECISION = formats.DEFAULT_NORMALIZED_PRECISION
 
 
 def sam_checkpoint_path(model_name: str, models_dir: Path = Path('models')) -> Path:

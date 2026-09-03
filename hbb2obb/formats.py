@@ -65,6 +65,10 @@ SIDECAR_DIRS = frozenset({"labels_confidence", "labels_polygon"})
 # it is what the integer formats round from.
 DEFAULT_PRECISION = 2
 
+# Decimals a normalized coordinate is written at, comfortably above what any real frame needs to
+# survive the round trip back to pixels (see `sufficient_precision`).
+DEFAULT_NORMALIZED_PRECISION = 10
+
 DOTA_IMAGESOURCE = "drone"
 DOTA_GSD = "null"
 
@@ -151,10 +155,46 @@ def _round_xyxy(box: Box) -> List[int]:
     return [int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))]
 
 
+# A relative coordinate sits around 1 and an absolute one is measured in pixels, so any bound
+# between the two separates them. This one lets a box run a whole frame past the edge before it
+# reads as pixels, and calls a set absolute only at a coordinate no relative box reaches.
+NORMALIZED_LIMIT = 2.0
+
+
 # ---------------------------------------------------------------------------------------- readers
-def _looks_normalized(values: Sequence[float]) -> bool:
-    """Coordinates that all sit in [0, 1] are relative; anything larger is absolute pixels."""
-    return bool(values) and all(0.0 <= v <= 1.0 for v in values)
+def looks_normalized(values: Sequence[float]) -> Optional[bool]:
+    """
+    Whether coordinates are relative to the frame rather than absolute pixels.
+
+    Returns None for an empty sequence, which says nothing either way and must not be read as an
+    answer. A set confined to the top-left two pixels would be misread, which no real frame is.
+
+    A ``[0, 1]`` test is not enough. A fitted OBB may extend past the frame it was fitted in, so a
+    normalized set legitimately holds a corner at -0.005 or 1.008, and one such corner used to
+    flip a whole file to pixels: every box in it then collapsed into the top-left corner.
+    """
+    values = [abs(v) for v in values]
+    if not values:
+        return None
+    return max(values) <= NORMALIZED_LIMIT
+
+
+def sufficient_precision(img_shape: Tuple[int, int]) -> int:
+    """
+    Decimals a normalized coordinate needs to land back where it came from.
+
+    Reading a normalized set multiplies by the frame size, so a coordinate written at ``p``
+    decimals moves by up to half of ``10 ** -p`` of the frame on the way back. The bar is not
+    half a pixel but half of `canonicalize`'s hundredth-of-a-pixel step, and clearing it is what
+    makes the round trip exact rather than merely close: a coordinate landing within half a step
+    of its canonical rounds back onto that same canonical, so every integer format derived from
+    the reconstruction derives from the value it always did.
+    """
+    longest = max(img_shape)
+    precision = 1
+    while 0.5 * 10.0**-precision * longest >= 0.5 * 10.0**-DEFAULT_PRECISION:
+        precision += 1
+    return precision
 
 
 def read_yolo(path: Path, width: int, height: int) -> List[Box]:
@@ -181,7 +221,7 @@ def read_yolo(path: Path, width: int, height: int) -> List[Box]:
         )
 
     flat = [float(v) for ln in lines for v in ln[1 : 1 + n_coords]]
-    normalized = _looks_normalized(flat)
+    normalized = looks_normalized(flat)
 
     boxes = []
     for ln in lines:
@@ -331,7 +371,7 @@ def write_yolo(
 ) -> None:
     """Write a YOLO TXT file, oriented or horizontal, with the confidence column when boxes carry one."""
     if precision is None:
-        precision = 10 if normalize else DEFAULT_PRECISION
+        precision = DEFAULT_NORMALIZED_PRECISION if normalize else DEFAULT_PRECISION
     fmt = f"{{:.{precision}f}}"
 
     lines = []
@@ -579,6 +619,23 @@ def detect_format(path: Path) -> str:
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
 
 
+def _exif_orientation(payload: bytes) -> Optional[int]:
+    """The Orientation tag (0x0112) of a JPEG APP1 payload, or None if it carries no Exif."""
+    if payload[:6] != b"Exif\x00\x00":
+        return None
+    tiff = payload[6:]
+    if tiff[:2] not in (b"II", b"MM"):
+        return None
+    order = "little" if tiff[:2] == b"II" else "big"
+    offset = int.from_bytes(tiff[4:8], order)
+    count = int.from_bytes(tiff[offset : offset + 2], order)
+    for i in range(count):
+        entry = offset + 2 + i * 12
+        if int.from_bytes(tiff[entry : entry + 2], order) == 0x0112:
+            return int.from_bytes(tiff[entry + 8 : entry + 10], order)
+    return None
+
+
 def image_size(path: Path) -> Optional[Tuple[int, int]]:
     """
     Read an image's (width, height) from its header, without decoding it.
@@ -586,6 +643,10 @@ def image_size(path: Path) -> Optional[Tuple[int, int]]:
     Only the size is ever needed here, to denormalize relative coordinates and to fill in the
     formats that declare one, and decoding a directory of 4K frames to learn it is pure waste.
     Falls back to OpenCV for anything the three header layouts below do not cover.
+
+    A JPEG's Exif orientation is applied, because ``cv2.imread`` applies it too: the size reported
+    here has to be the size of the frame the boxes were fitted in, or every coordinate normalized
+    against it is divided by the wrong dimension.
     """
     try:
         with open(path, "rb") as f:
@@ -599,6 +660,7 @@ def image_size(path: Path) -> Optional[Tuple[int, int]]:
                 return (abs(width), abs(height))
             if head[:2] == b"\xff\xd8":  # JPEG: walk the segments to the frame header
                 f.seek(2)
+                orientation = None
                 while True:
                     marker = f.read(2)
                     if len(marker) < 2 or marker[0] != 0xFF:
@@ -607,12 +669,16 @@ def image_size(path: Path) -> Optional[Tuple[int, int]]:
                         f.read(3)  # segment length and sample precision
                         height = int.from_bytes(f.read(2), "big")
                         width = int.from_bytes(f.read(2), "big")
-                        return (width, height)
+                        # Orientations 5 to 8 turn the frame a quarter turn, swapping its axes.
+                        return (height, width) if orientation in (5, 6, 7, 8) else (width, height)
                     length = int.from_bytes(f.read(2), "big")
                     if length < 2:
                         break
+                    if marker[1] == 0xE1 and orientation is None:  # APP1, where Exif lives
+                        orientation = _exif_orientation(f.read(length - 2))
+                        continue
                     f.seek(length - 2, 1)
-    except OSError:
+    except (OSError, IndexError, ValueError):
         return None
 
     import cv2

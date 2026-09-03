@@ -252,6 +252,96 @@ def test_image_size_returns_none_for_a_missing_file(tmp_path):
     assert formats.image_size(tmp_path / "nope.jpg") is None
 
 
+def test_image_size_applies_the_exif_orientation(tmp_path):
+    """
+    cv2.imread turns a quarter-turn JPEG, so the header's own width and height are not the frame
+    the boxes were fitted in. Normalizing against the unturned size divides x by the height.
+    """
+    cv2 = pytest.importorskip("cv2")
+    Image = pytest.importorskip("PIL.Image")
+
+    landscape = np.zeros((200, 400, 3), np.uint8)
+    turned, upright = tmp_path / "turned.jpg", tmp_path / "upright.jpg"
+
+    image = Image.fromarray(landscape)
+    exif = image.getexif()
+    exif[274] = 6  # rotate 90 degrees, so decoders present it as 200x400
+    image.save(turned, exif=exif)
+    Image.fromarray(landscape).save(upright)
+
+    assert formats.image_size(turned) == (200, 400)
+    assert formats.image_size(turned) == tuple(reversed(cv2.imread(str(turned)).shape[:2]))
+    assert formats.image_size(upright) == (400, 200), "an untagged JPEG must be left alone"
+
+
+# ------------------------------------------------------------------ the relative/absolute question
+def test_looks_normalized_separates_the_two_conventions():
+    assert formats.looks_normalized([]) is None, "no coordinates is not an answer"
+    assert formats.looks_normalized([0.1, 0.9, 0.5]) is True
+    assert formats.looks_normalized([10.0, 200.0]) is False
+
+
+def test_a_corner_past_the_frame_stays_normalized():
+    """
+    A fitted OBB may extend past the frame it was fitted in, and the shipped sample already holds
+    corners 17 px beyond the edge. Under a [0, 1] test one such corner turned the whole file into
+    absolute pixels and every box in it collapsed into the top-left corner.
+    """
+    assert formats.looks_normalized([-0.005, 0.5, 1.00787]) is True
+
+
+def test_read_yolo_denormalizes_a_file_that_runs_past_the_edge(tmp_path):
+    path = tmp_path / "f.txt"
+    path.write_text("0 0.5 0.9 0.6 0.9 0.6 1.00787 0.5 1.00787\n", encoding="utf-8")
+
+    (box,) = formats.read_yolo(path, 3840, 2160)
+    assert box.quad[0].tolist() == pytest.approx([1920.0, 1944.0])
+    assert box.quad[2].tolist() == pytest.approx([2304.0, 2177.0], abs=0.5)
+
+
+# ----------------------------------------------------------------------- the normalized round trip
+def test_sufficient_precision_grows_with_the_frame():
+    assert formats.sufficient_precision((3840, 2160)) == 6
+    assert formats.sufficient_precision((640, 480)) == 5
+    assert formats.sufficient_precision((10, 10)) == 4
+    assert formats.sufficient_precision((3840, 2160)) <= formats.DEFAULT_NORMALIZED_PRECISION
+
+
+@pytest.mark.parametrize("size", [(3840, 2160), (640, 480), (1920, 1080)])
+def test_a_normalized_yolo_set_verifies_against_its_absolute_dota_sibling(tmp_path, size):
+    """
+    The round trip that matters for a release: labels written relative, read back, and proved to
+    encode the same boxes as the absolute formats derived from them.
+    """
+    width, height = size
+    boxes = [Box(0, rotated(width * 0.5, height * 0.5, 120, 40, 25)), Box(1, formats.rect(4, 4, 60, 30))]
+    frames = formats.canonicalize([FrameAnnotations("a", width, height, boxes)])
+
+    precision = formats.sufficient_precision(size)
+    formats.write_set(frames, tmp_path, "yolo", NAMES, "obb", normalize=True, precision=precision)
+    formats.write_set(frames, tmp_path, "dota", NAMES, "obb")
+
+    sizes = {"a": size}
+    yolo, _, _ = formats.read_set(tmp_path, "yolo", NAMES, sizes)
+    dota, _, _ = formats.read_set(tmp_path, "dota", NAMES, sizes)
+    assert formats.verify({"yolo": formats.canonicalize(yolo), "dota": formats.canonicalize(dota)}) == []
+
+
+def test_too_few_decimals_move_the_boxes(tmp_path):
+    """The guard earns its place: below what the frame needs and the round trip stops agreeing."""
+    size = (3840, 2160)
+    frames = formats.canonicalize([FrameAnnotations("a", *size, [Box(0, rotated(1000, 700, 120, 40, 25))])])
+
+    formats.write_set(frames, tmp_path, "yolo", NAMES, "obb", normalize=True, precision=2)
+    formats.write_set(frames, tmp_path, "dota", NAMES, "obb")
+
+    sizes = {"a": size}
+    yolo, _, _ = formats.read_set(tmp_path, "yolo", NAMES, sizes)
+    dota, _, _ = formats.read_set(tmp_path, "dota", NAMES, sizes)
+    problems = formats.verify({"yolo": formats.canonicalize(yolo), "dota": formats.canonicalize(dota)})
+    assert any("corners disagree" in p for p in problems)
+
+
 # ----------------------------------------------------------------------------------------- verify
 def test_verify_accepts_agreeing_sets_and_names_the_disagreement():
     a = formats.canonicalize([make_frame(boxes=[Box(0, formats.rect(10, 10, 20, 20))])])
