@@ -11,6 +11,13 @@ import hashlib
 from hbb2obb import provenance
 
 
+def recorded_command(path):
+    """The reproducing command, which is the line under the section that promises it."""
+    lines = path.read_text().splitlines()
+    heading = next(i for i, ln in enumerate(lines) if ln.startswith("Command that reproduces"))
+    return lines[heading + 2]
+
+
 def test_sha256_matches_hashlib(tmp_path):
     path = tmp_path / "weights.pt"
     path.write_bytes(b"not really a checkpoint")
@@ -386,3 +393,54 @@ def test_detection_provenance_records_absolute_decimals(tmp_path):
     text = out.read_text()
     assert "--precision 2" in text
     assert "Coordinates              : absolute pixels, 2 decimals" in text
+
+
+def test_conversion_provenance_records_where_the_confidence_went(tmp_path):
+    """
+    The header promises a command that reproduces the annotations, and --save_confidence is what
+    puts the 10th column in them. Naming the confidence source while omitting the flag that wrote
+    it described labels the command would not produce.
+    """
+    out = tmp_path / "PROVENANCE.txt"
+    common = dict(
+        img_source=tmp_path / "images",
+        hbb_dir=None,
+        obb_dir=None,
+        sam_models=["sam_b"],
+        imgsz=1280,
+        scale_factors=[0.05],
+        opening_kernel_percentage=0.15,
+        models_dir=tmp_path / "models",
+    )
+
+    provenance.write_conversion_provenance(out=out, save_confidence=True, **common)
+    text = out.read_text()
+    assert "--save_confidence" in text
+    assert "Confidence written       : 10th column" in text
+
+    provenance.write_conversion_provenance(out=out, **common)
+    assert "Confidence written       : not written" in out.read_text()
+
+
+def test_a_bare_confidence_dir_is_recorded_as_given(tmp_path):
+    """`--confidence_dir` takes an optional value; bare means the conventional location."""
+    out = tmp_path / "PROVENANCE.txt"
+    common = dict(
+        img_source=tmp_path / "images",
+        hbb_dir=None,
+        obb_dir=None,
+        sam_models=["sam_b"],
+        imgsz=1280,
+        scale_factors=[0.05],
+        opening_kernel_percentage=0.15,
+        models_dir=tmp_path / "models",
+    )
+
+    provenance.write_conversion_provenance(out=out, confidence_dir="", **common)
+    assert recorded_command(out).endswith("--confidence_dir"), "the bare form takes no value"
+    assert "side-car (default location)" in out.read_text()
+
+    provenance.write_conversion_provenance(out=out, save_confidence=True, confidence_dir="scores", **common)
+    text = out.read_text()
+    assert "--save_confidence --confidence_dir scores" in text
+    assert "Confidence written       : 10th column and side-car scores" in text

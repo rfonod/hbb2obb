@@ -244,6 +244,21 @@ REPRODUCIBILITY = [
 ]
 
 
+def confidence_placement(save_confidence: bool, confidence_dir: Optional[str]) -> str:
+    """
+    Where a run put its per-OBB scores: in the label file, beside it, both, or nowhere.
+
+    ``confidence_dir`` is the flag as it was given, so the empty string means it was passed bare
+    and the scores went to the conventional location.
+    """
+    places = []
+    if save_confidence:
+        places.append("10th column")
+    if confidence_dir is not None:
+        places.append(f"side-car {confidence_dir}" if confidence_dir else "side-car (default location)")
+    return " and ".join(places) if places else "not written"
+
+
 def coordinate_convention(normalize: bool, precision: Optional[int]) -> str:
     """
     The one line that says which convention a set of labels is in, and how finely.
@@ -272,6 +287,8 @@ def write_conversion_provenance(
     notes: Sequence[str] = (),
     normalize: bool = False,
     precision: Optional[int] = None,
+    save_confidence: bool = False,
+    confidence_dir: Optional[str] = None,
 ) -> int:
     """Record the settings an `hbb2obb` conversion actually ran with."""
     command = ["hbb2obb", str(img_source) if img_source else "<img_source>"]
@@ -285,6 +302,10 @@ def write_conversion_provenance(
     command += ["--opening_kernel_percentage", str(opening_kernel_percentage)]
     if confidence_source != "conversion":
         command += ["--confidence_source", confidence_source]
+    if save_confidence:
+        command += ["--save_confidence"]
+    if confidence_dir is not None:
+        command += ["--confidence_dir"] + ([str(confidence_dir)] if confidence_dir else [])
     if normalize:
         command += ["--normalize"]
         if precision is not None:
@@ -308,6 +329,7 @@ def write_conversion_provenance(
         f"Scale factor(s)          : {' '.join(str(s) for s in scale_factors)}",
         f"Opening kernel           : {opening_kernel_percentage}",
         f"Confidence source        : {confidence_source}",
+        f"Confidence written       : {confidence_placement(save_confidence, confidence_dir)}",
         f"Coordinates              : {coordinate_convention(normalize, precision)}",
         f"Inference device         : {device if device else 'ultralytics default'}",
     ]

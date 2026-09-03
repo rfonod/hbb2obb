@@ -398,6 +398,8 @@ def main_hbb2obb():
             device=args.device,
             normalize=args.normalize,
             precision=precision if args.normalize else None,
+            save_confidence=args.save_confidence,
+            confidence_dir=args.confidence_dir,
         )
 
 

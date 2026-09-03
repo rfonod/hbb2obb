@@ -563,25 +563,23 @@ class TestSavePolygonAnnotations(unittest.TestCase):
 
     def test_fallback_matches_its_obb_when_normalized(self):
         """
-        The fallback used to truncate to int before normalizing while the OBB writer did not, so
-        the two row-aligned files could disagree by up to a pixel on the same object.
+        The fallback reuses the OBB corners, and coordinate_fields is the only place they are
+        rounded. Rounding them first in the polygon writer, as an int cast did, would put the
+        normalized polygon a pixel off the OBB it is supposed to equal. The pipeline hands both
+        writers an integer array today, so this drives them directly with a fractional one.
         """
         img_shape = (640, 480)
+        obb = np.array([[0, 400.6, 300.4, 500.6, 300.4, 500.6, 400.4, 400.6, 400.4]])
+
         with tempfile.TemporaryDirectory() as tmp:
             img_path = Path(tmp) / "images" / "sample.jpg"
-            save_obb_annotations(self.obb_annotations, Path(tmp) / "obb", img_path, normalize=True, img_shape=img_shape)
-            save_polygon_annotations(
-                self.contours,
-                self.obb_annotations,
-                Path(tmp) / "poly",
-                img_path,
-                normalize=True,
-                img_shape=img_shape,
-            )
-            obb_lines = (Path(tmp) / "obb" / "sample.txt").read_text().splitlines()
-            polygon_lines = (Path(tmp) / "poly" / "sample.txt").read_text().splitlines()
+            save_obb_annotations(obb, Path(tmp) / "obb", img_path, normalize=True, img_shape=img_shape)
+            save_polygon_annotations([None], obb, Path(tmp) / "poly", img_path, normalize=True, img_shape=img_shape)
+            obb_line = (Path(tmp) / "obb" / "sample.txt").read_text().split()
+            polygon_line = (Path(tmp) / "poly" / "sample.txt").read_text().split()
 
-        self.assertEqual(polygon_lines[1].split()[1:], obb_lines[1].split()[1:])
+        self.assertEqual(polygon_line[1:], obb_line[1:])
+        self.assertEqual(float(obb_line[1]), 400.6 / 640, "the OBB writer must not pre-round either")
 
     def test_row_aligned_with_obb_file(self):
         """The polygon file has one line per OBB, in the same order"""
