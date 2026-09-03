@@ -2,7 +2,7 @@
 # Author: Robert Fonod (robert.fonod@ieee.org)
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Sequence, Tuple, Union
 
 import cv2
 import numpy as np
@@ -14,6 +14,11 @@ from hbb2obb.utils import Annotations, get_hbb_dir
 # repeated hbb2obb() calls (e.g. one per image in a directory) reuse an already-loaded model
 # instead of reconstructing it from disk on every call.
 _MODEL_CACHE: Dict[str, Any] = {}
+
+# Decimals written for normalized coordinates, matching formats.write_yolo. Ten places put the
+# round-trip error at ~4e-7 px on a 4K frame, far below the half of a hundredth of a pixel that
+# would move an integer format derived from the same box.
+DEFAULT_NORMALIZED_PRECISION = 10
 
 
 def sam_checkpoint_path(model_name: str, models_dir: Path = Path('models')) -> Path:
@@ -665,6 +670,42 @@ def resolve_output_dir(output_dir: Path, img_path: Path, default_subdir: str) ->
     return output_dir
 
 
+def _trim(value: float, precision: int) -> str:
+    """Format a coordinate at the given precision without trailing zeros ('12.50' -> '12.5')."""
+    text = f"{value:.{precision}f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def coordinate_fields(
+    coords: Sequence[float],
+    normalize: bool = False,
+    img_shape: Tuple[int, int] = None,
+    precision: int = DEFAULT_NORMALIZED_PRECISION,
+) -> str:
+    """
+    Format one object's coordinates, alternating x and y, as the body of a YOLO label line.
+
+    The single place the conversion's output convention is decided, shared by the OBB and polygon
+    writers so a run cannot end up with one normalized and the other not.
+
+    Absolute output stays integral: that is what this pipeline has always written, and what the
+    shipped sample and every format derived from it were rounded from. Normalized output divides
+    each coordinate by the frame dimension it belongs to, which is what Ultralytics reads.
+
+    Args:
+        coords: Flat sequence of alternating x, y values
+        normalize: Write coordinates relative to the frame size instead of in pixels
+        img_shape: (width, height) of the frame, required when ``normalize`` is set
+        precision: Decimal places for normalized output; ignored for absolute output
+    """
+    if not normalize:
+        return " ".join(str(int(v)) for v in coords)
+    if not img_shape:
+        raise ValueError("img_shape is required to write normalized coordinates")
+    width, height = img_shape
+    return " ".join(_trim(v / (width if i % 2 == 0 else height), precision) for i, v in enumerate(coords))
+
+
 def format_annotation_line(fields: str, confidences: List[float], i: int) -> str:
     """
     Append the per-object confidence score to an annotation line when ``confidences`` is
@@ -676,20 +717,29 @@ def format_annotation_line(fields: str, confidences: List[float], i: int) -> str
     return fields
 
 
-def save_obb_annotations(obb_annotations: np.ndarray, obb_dir: Path, img_path: Path, confidences: List[float] = None):
+def save_obb_annotations(
+    obb_annotations: np.ndarray,
+    obb_dir: Path,
+    img_path: Path,
+    confidences: List[float] = None,
+    normalize: bool = False,
+    img_shape: Tuple[int, int] = None,
+    precision: int = DEFAULT_NORMALIZED_PRECISION,
+):
     """
     Save OBB annotations to a text file.
 
-    Each line is ``class x1 y1 x2 y2 x3 y3 x4 y4``. When ``confidences`` is provided, a 10th
-    field with the per-OBB confidence score is appended (``... x4 y4 conf``).
+    Each line is ``class x1 y1 x2 y2 x3 y3 x4 y4``, in absolute pixels unless ``normalize`` is
+    set, in which case the eight coordinates are relative to the frame and Ultralytics reads the
+    file unchanged. When ``confidences`` is provided, a 10th field with the per-OBB confidence
+    score is appended (``... x4 y4 conf``).
     """
     obb_dir = resolve_output_dir(obb_dir, img_path, "labels_obb")
     save_filepath = obb_dir / (img_path.stem + ".txt")
 
     with open(save_filepath, "w", encoding="utf-8") as f:
         for i, obb in enumerate(obb_annotations):
-            label, x1, y1, x2, y2, x3, y3, x4, y4 = map(int, obb)
-            line = f"{label} {x1} {y1} {x2} {y2} {x3} {y3} {x4} {y4}"
+            line = f"{int(obb[0])} " + coordinate_fields(obb[1:], normalize, img_shape, precision)
             f.write(format_annotation_line(line, confidences, i) + "\n")
 
 
@@ -716,6 +766,9 @@ def save_polygon_annotations(
     img_path: Path,
     confidences: List[float] = None,
     simplify_epsilon: float = 0.0,
+    normalize: bool = False,
+    img_shape: Tuple[int, int] = None,
+    precision: int = DEFAULT_NORMALIZED_PRECISION,
 ) -> None:
     """
     Save the segmentation polygons to a text file, as a tighter alternative to the OBBs.
@@ -740,6 +793,10 @@ def save_polygon_annotations(
                      this fraction of the contour perimeter (cv2.arcLength), so one value behaves
                      consistently across object sizes; 0.005 to 0.02 are typical. The default 0
                      writes the raw contour. Fallback rectangles are never simplified.
+        normalize: Write coordinates relative to the frame size instead of in pixels. Follows the
+                     OBB file it sits beside, so one directory never mixes the two conventions.
+        img_shape: (width, height) of the frame, required when ``normalize`` is set
+        precision: Decimal places for normalized output; ignored for absolute output
     """
     if contours is None or len(contours) != len(obb_annotations):
         raise ValueError(
@@ -757,7 +814,9 @@ def save_polygon_annotations(
                 points = np.array(obb[1:], dtype=np.int32).reshape(-1, 2)
             else:
                 points = simplify_contour(contours[i], simplify_epsilon)
-            line = f"{int(obb[0])} " + " ".join(f"{int(x)} {int(y)}" for x, y in points)
+            line = f"{int(obb[0])} " + coordinate_fields(
+                np.asarray(points).reshape(-1), normalize, img_shape, precision
+            )
             f.write(format_annotation_line(line, confidences, i) + "\n")
 
 

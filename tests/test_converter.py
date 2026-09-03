@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 import hbb2obb.converter as converter
+import hbb2obb.formats as formats
 from hbb2obb.converter import (
     aggregate_masks_by_majority_vote,
     clear_model_cache,
@@ -668,6 +669,58 @@ class TestDeviceForwarding(unittest.TestCase):
         shared = {}
         self._run(device="cpu", model_kwargs=shared)
         self.assertEqual(shared, {})
+
+
+class TestNormalizedOutput(unittest.TestCase):
+    """
+    `--normalize` writes the convention Ultralytics reads, and absolute output is untouched.
+
+    Ultralytics asserts every YOLO coordinate is <= 1.01 and drops the label otherwise, so an
+    absolute OBB file is rejected as corrupt and a dataset of them trains on nothing.
+    """
+
+    def setUp(self):
+        self.obb = np.array([[0, 100, 200, 300, 200, 300, 400, 100, 400]])
+        self.contours = [np.array([[[100, 200]], [[300, 200]], [[300, 400]], [[100, 400]]], np.int32)]
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.img_path = self.root / "images" / "f.jpg"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_absolute_output_is_unchanged(self):
+        """The default is byte for byte what it always was: the shipped sample depends on it"""
+        save_obb_annotations(self.obb, self.root / "labels", self.img_path)
+        self.assertEqual((self.root / "labels" / "f.txt").read_text().strip(), "0 100 200 300 200 300 400 100 400")
+
+    def test_normalized_coordinates_divide_x_by_width_and_y_by_height(self):
+        save_obb_annotations(self.obb, self.root / "labels", self.img_path, normalize=True, img_shape=(3840, 2160))
+        values = [float(v) for v in (self.root / "labels" / "f.txt").read_text().split()[1:]]
+        self.assertAlmostEqual(values[0], 100 / 3840)
+        self.assertAlmostEqual(values[1], 200 / 2160)
+        self.assertTrue(all(0.0 <= v <= 1.0 for v in values))
+
+    def test_the_round_trip_recovers_the_pixels_the_derived_formats_round(self):
+        """
+        Ten decimals keep the error far below the half-hundredth of a pixel that would move a
+        DOTA, VOC or COCO integer derived from the same box.
+        """
+        save_obb_annotations(self.obb, self.root / "labels", self.img_path, normalize=True, img_shape=(3840, 2160))
+        recovered = formats.read_yolo(self.root / "labels" / "f.txt", 3840, 2160)[0].quad.reshape(-1)
+        self.assertTrue(np.allclose(recovered, self.obb[0][1:], atol=0.005))
+
+    def test_polygons_follow_the_obb_convention(self):
+        """One directory must never mix the two conventions"""
+        save_polygon_annotations(
+            self.contours, self.obb, self.root / "poly", self.img_path, normalize=True, img_shape=(3840, 2160)
+        )
+        values = [float(v) for v in (self.root / "poly" / "f.txt").read_text().split()[1:]]
+        self.assertTrue(all(0.0 <= v <= 1.0 for v in values))
+
+    def test_normalizing_without_a_frame_size_is_refused(self):
+        with self.assertRaises(ValueError):
+            save_obb_annotations(self.obb, self.root / "labels", self.img_path, normalize=True)
 
 
 class TestDeviceResultRelease(unittest.TestCase):

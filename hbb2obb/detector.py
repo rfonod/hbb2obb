@@ -337,7 +337,7 @@ def save_hbb_annotations(
     Returns:
         The path written.
     """
-    from hbb2obb.converter import format_annotation_line, resolve_output_dir
+    from hbb2obb.converter import _trim, format_annotation_line, resolve_output_dir
 
     if normalize and not img_shape:
         raise ValueError("img_shape is required to write normalized coordinates")
@@ -353,9 +353,3 @@ def save_hbb_annotations(
             fields = f"{int(box[0])} " + " ".join(_trim(value, precision) for value in coords)
             f.write(format_annotation_line(fields, scores, i) + "\n")
     return save_filepath
-
-
-def _trim(value: float, precision: int) -> str:
-    """Format a coordinate at the given precision without trailing zeros ('12.50' -> '12.5')."""
-    text = f"{value:.{precision}f}"
-    return text.rstrip("0").rstrip(".") if "." in text else text

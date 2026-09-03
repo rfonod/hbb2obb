@@ -208,6 +208,18 @@ def main_hbb2obb():
         help="Simplify saved polygons with an epsilon of this fraction of the contour perimeter (0 to disable)",
     )
     parser.add_argument(
+        "--normalize",
+        "-n",
+        action="store_true",
+        help="Write YOLO coordinates relative to [0, 1], the convention Ultralytics reads",
+    )
+    parser.add_argument(
+        "--precision",
+        "-p",
+        type=int,
+        help="Decimal places for normalized output (default: 10); absolute output is integral",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         help="Inference device for the SAM model(s), e.g. 'cpu', '0', 'cuda:0', 'mps' (default: ultralytics picks)",
@@ -236,6 +248,7 @@ def main_hbb2obb():
     import tqdm
 
     from hbb2obb.converter import (
+        DEFAULT_NORMALIZED_PRECISION,
         hbb2obb,
         resolve_output_dir,
         save_confidence_annotations,
@@ -243,7 +256,14 @@ def main_hbb2obb():
         save_polygon_annotations,
         unpack_results,
     )
+    from hbb2obb.formats import image_size
     from hbb2obb.utils import get_hbb_dir, get_image_paths, process_ultralytics_kwargs
+
+    # --precision only says how many decimals normalized coordinates get; absolute output is
+    # integral and has none. Accepting it silently would look like it did something.
+    if args.precision is not None and not args.normalize:
+        parser.error("--precision applies to normalized output; add --normalize or drop it")
+    precision = args.precision if args.precision is not None else DEFAULT_NORMALIZED_PRECISION
 
     model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
 
@@ -286,12 +306,36 @@ def main_hbb2obb():
         # The trailing column is written only when it was asked for by name; --confidence_dir on
         # its own leaves the label files with their standard nine fields.
         in_line = confidences if args.save_confidence else None
-        save_obb_annotations(obb_annotations, args.obb_dir, img_path, confidences=in_line)
+
+        # Read the frame size from the header rather than decoding: normalizing needs nothing else.
+        img_shape = None
+        if args.normalize:
+            img_shape = image_size(img_path)
+            if img_shape is None:
+                raise SystemExit(f"cannot read the image size of {img_path}, needed by --normalize")
+
+        save_obb_annotations(
+            obb_annotations,
+            args.obb_dir,
+            img_path,
+            confidences=in_line,
+            normalize=args.normalize,
+            img_shape=img_shape,
+            precision=precision,
+        )
         if write_confidence_dir:
             save_confidence_annotations(confidences, confidence_dir, img_path)
         if args.save_polygon:
             save_polygon_annotations(
-                contours, obb_annotations, args.polygon_dir, img_path, in_line, args.polygon_epsilon
+                contours,
+                obb_annotations,
+                args.polygon_dir,
+                img_path,
+                in_line,
+                args.polygon_epsilon,
+                normalize=args.normalize,
+                img_shape=img_shape,
+                precision=precision,
             )
 
     if args.save_provenance and image_paths:
@@ -310,6 +354,7 @@ def main_hbb2obb():
             confidence_source=args.confidence_source,
             model_kwargs=args.model_kwargs,
             device=args.device,
+            normalize=args.normalize,
         )
 
 

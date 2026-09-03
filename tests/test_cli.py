@@ -62,3 +62,21 @@ def test_the_epilog_stays_in_sync_with_the_registered_scripts():
     scripts = set(re.findall(r'^"?(hbb2obb[\w-]*)"?\s*=', section, re.M))
     listed = {line.split()[0] for line in cli.ENTRY_POINTS_EPILOG.splitlines() if line.startswith("  hbb2obb")}
     assert listed == scripts
+
+
+def test_precision_without_normalize_is_refused(monkeypatch, capsys):
+    """
+    Absolute output is integral and has no decimals to set, so accepting --precision on its own
+    would look like it did something. Same rule the confidence side-car follows.
+    """
+    monkeypatch.setattr("sys.argv", ["hbb2obb", "images", "--precision", "6"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main_hbb2obb()
+    assert exc.value.code == 2
+    assert "--precision applies to normalized output" in capsys.readouterr().err
+
+
+def test_normalize_is_offered_by_the_conversion_command(monkeypatch, capsys):
+    """`hbb2obb-detect` and `hbb2obb-convert` have had it; the conversion itself was the gap."""
+    out = run_help(monkeypatch, capsys)
+    assert "--normalize" in out
