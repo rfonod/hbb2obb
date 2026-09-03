@@ -73,6 +73,9 @@ def evaluate_obb(
     # For class-agnostic evaluation, track matches where classes differ
     cross_class_matches = 0
 
+    # The coordinate-convention mismatch below is reported once for the whole run, not per file
+    warned_about_convention = False
+
     for gt_file in tqdm.tqdm(gt_files, desc="Evaluating files", leave=True, disable=no_bar):
         pred_file = Path(pred_dir) / gt_file.name
 
@@ -82,6 +85,19 @@ def evaluate_obb(
 
         gt_boxes = parse_obb_file(gt_file)
         pred_boxes = parse_obb_file(pred_file)
+
+        # IoU is affine-invariant, so two normalized sets score exactly as two absolute ones do.
+        # One of each does not: every pair misses and the run reports near-zero IoU with nothing
+        # obviously wrong. Say so once rather than let the numbers be read as a conversion failure.
+        if not warned_about_convention:
+            gt_relative, pred_relative = looks_normalized(gt_boxes), looks_normalized(pred_boxes)
+            if gt_relative is not None and pred_relative is not None and gt_relative != pred_relative:
+                relative, absolute = ("ground truth", "predictions") if gt_relative else ("predictions", "ground truth")
+                print(
+                    f"Warning: {relative} appear to be normalized to [0, 1] while the {absolute} are in absolute "
+                    f"pixels (first seen in {gt_file.name}). Convert one side before reading these numbers."
+                )
+                warned_about_convention = True
 
         # Filter out excluded classes
         gt_boxes = [box for box in gt_boxes if box['label'] not in excluded_classes]
@@ -286,6 +302,25 @@ def parse_obb_file(file_path):
             boxes.append({'label': label, 'polygon': polygon, 'points': points})
 
     return boxes
+
+
+def looks_normalized(boxes):
+    """
+    Whether a parsed frame's boxes are relative to the frame rather than in absolute pixels.
+
+    Returns None for a frame with no boxes, which says nothing either way and must not be read as
+    an answer. A box wholly inside the top-left pixel would be misread, which no real object is.
+
+    Args:
+        boxes (list): Boxes as returned by parse_obb_file.
+
+    Returns:
+        bool | None: True if every coordinate sits in [0, 1], None if there are no boxes.
+    """
+    coordinates = [v for box in boxes for point in box['points'] for v in point]
+    if not coordinates:
+        return None
+    return all(0.0 <= v <= 1.0 for v in coordinates)
 
 
 def calculate_obb_iou(poly1, poly2):
