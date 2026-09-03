@@ -22,7 +22,7 @@
 <details>
 <summary><b>📋 Full Feature Overview</b></summary>
 
-- **HBB to OBB conversion**: converts YOLO-format horizontal bounding boxes to oriented bounding boxes.
+- **HBB to OBB conversion**: converts YOLO-format horizontal bounding boxes to oriented bounding boxes, in absolute px or, with `--normalize`, relative to `[0, 1]` for Ultralytics training ([details](#data-format)).
 - **HBB detection**: produce the horizontal boxes in the first place with any Ultralytics detector, local, from the Ultralytics catalogue, or from Hugging Face ([details](#detecting-hbbs)).
 - **Segmentation-based**: uses state-of-the-art SAM models for accurate object boundary detection.
 - **Multiple model support**: SAM, SAM2, SAM2.1, SAM3, Mobile SAM, and FastSAM families ([details](https://docs.ultralytics.com/models/sam/)).
