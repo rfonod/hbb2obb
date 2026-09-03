@@ -258,6 +258,7 @@ def write_conversion_provenance(
     device: Optional[str] = None,
     models_dir: Path = Path("models"),
     notes: Sequence[str] = (),
+    normalize: bool = False,
 ) -> int:
     """Record the settings an `hbb2obb` conversion actually ran with."""
     command = ["hbb2obb", str(img_source) if img_source else "<img_source>"]
@@ -271,6 +272,8 @@ def write_conversion_provenance(
     command += ["--opening_kernel_percentage", str(opening_kernel_percentage)]
     if confidence_source != "conversion":
         command += ["--confidence_source", confidence_source]
+    if normalize:
+        command += ["--normalize"]
     if device:
         command += ["--device", device]
     if model_kwargs:
@@ -290,6 +293,7 @@ def write_conversion_provenance(
         f"Scale factor(s)          : {' '.join(str(s) for s in scale_factors)}",
         f"Opening kernel           : {opening_kernel_percentage}",
         f"Confidence source        : {confidence_source}",
+        f"Coordinates              : {'normalized to [0, 1]' if normalize else 'absolute pixels'}",
         f"Inference device         : {device if device else 'ultralytics default'}",
     ]
     if model_kwargs:

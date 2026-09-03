@@ -186,6 +186,7 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--save_confidence`: append a per-OBB [confidence score](#confidence-scores) as a 10th column in the output TXT files.
 - `--confidence_dir` / `-cd`: write those scores to their own directory instead, one score per line, row-aligned with the labels. Use it when the label files have to stay strictly standard, since Ultralytics and other YOLO OBB readers reject a 10th column. Give it bare for `img_source/../labels_confidence`.
 - `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
+- `--normalize` / `-n`: write the coordinates relative to `[0, 1]` instead of in absolute px, which is what Ultralytics reads. `--precision` / `-p` sets the decimals (default: 10). Applies to `--save_polygon` output too, so one run never mixes the two conventions.
 - `--device`: inference device for the SAM model(s), e.g. `cpu`, `0`, `cuda:0`, `mps` (default: Ultralytics picks).
 - `--model_kwargs` / `-k`: extra Ultralytics inference kwargs as `key1=value1,key2=value2`.
 
@@ -498,11 +499,13 @@ Blank lines are skipped, and an empty label file (a frame with no objects) is va
 
 You bring your own HBB annotations. If you don't have any, `hbb2obb-detect` produces them with an Ultralytics detector and writes this exact format, confidence column included (see [Detecting HBBs](#detecting-hbbs)).
 
-**OBB annotations (output)**: YOLO TXT, one file per image; four corners in absolute px:
+**OBB annotations (output)**: YOLO TXT, one file per image; four corners in absolute px, or relative to `[0, 1]` with `--normalize`:
 
 ```text
 class_id x1 y1 x2 y2 x3 y3 x4 y4
 ```
+
+> Ultralytics requires the normalized form and rejects an absolute label file as corrupt, so pass `--normalize` for output you intend to train on. The default stays absolute, which is the convention DOTA and the wider OBB ecosystem use and what every other format here is derived from.
 
 With `--save_confidence`, a 10th column holds the per-OBB [confidence score](#confidence-scores):
 
@@ -512,7 +515,7 @@ class_id x1 y1 x2 y2 x3 y3 x4 y4 confidence
 
 `hbb2obb-eval` ignores the trailing confidence column, so evaluation works on either variant.
 
-**Polygon annotations (optional output)**: with `--save_polygon`, the segmentation contour each OBB was fitted to is written to a parallel directory (`labels_polygon` by default), one file per image; a variable number of corners in absolute px:
+**Polygon annotations (optional output)**: with `--save_polygon`, the segmentation contour each OBB was fitted to is written to a parallel directory (`labels_polygon` by default), one file per image; a variable number of corners, in the same coordinate convention as the OBB file:
 
 ```text
 class_id x1 y1 x2 y2 ... xN yN
