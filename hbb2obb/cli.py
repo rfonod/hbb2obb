@@ -397,6 +397,7 @@ def main_hbb2obb():
             model_kwargs=args.model_kwargs,
             device=args.device,
             normalize=args.normalize,
+            precision=precision if args.normalize else None,
         )
 
 
@@ -615,6 +616,8 @@ def main_hbb2obb_detect():
             merged_with=args.merge_with,
             model_kwargs=args.model_kwargs,
             device=args.device,
+            normalize=args.normalize,
+            precision=args.precision,
         )
 
 
