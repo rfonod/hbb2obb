@@ -157,13 +157,37 @@ def test_is_complete_needs_a_full_grid(tmp_path):
     folder.mkdir()
     assert not optimizer.is_complete(folder, spec)
 
-    (folder / optimizer.RESULTS_NAME).write_text(yaml.dump({"all_results": [grid_point()]}), encoding="utf-8")
+    (folder / optimizer.RESULTS_NAME).write_text(
+        yaml.dump({"all_results": [grid_point(imgsz=640, sf=0.0)]}), encoding="utf-8"
+    )
     assert not optimizer.is_complete(folder, spec)  # one point of two: interrupted, must re-run
 
     (folder / optimizer.RESULTS_NAME).write_text(
-        yaml.dump({"all_results": [grid_point(sf=0.0), grid_point(sf=0.05)]}), encoding="utf-8"
+        yaml.dump({"all_results": [grid_point(imgsz=640, sf=0.0), grid_point(imgsz=640, sf=0.05)]}), encoding="utf-8"
     )
     assert optimizer.is_complete(folder, spec)
+
+
+def test_a_run_measured_on_a_different_grid_is_not_complete(tmp_path):
+    """
+    An edited axis must re-run, not resume.
+
+    Counting grid points would call a 45-point sweep over [1024, 1280, 1536] complete for a
+    45-point sweep over [768, 1024, 1280], and the benchmark summary would then report numbers
+    from image sizes its own config never names.
+    """
+    measured = optimizer.RunSpec(name="x", sam_models=["sam_b"], imgsz=[1024, 1536], scale_factors=[0.0])
+    folder = tmp_path / "x"
+    folder.mkdir()
+    (folder / optimizer.RESULTS_NAME).write_text(
+        yaml.dump({"all_results": [grid_point(imgsz=1024, sf=0.0), grid_point(imgsz=1536, sf=0.0)]}),
+        encoding="utf-8",
+    )
+    assert optimizer.is_complete(folder, measured)
+
+    retuned = optimizer.RunSpec(name="x", sam_models=["sam_b"], imgsz=[768, 1024], scale_factors=[0.0])
+    assert len(retuned.grid) == len(measured.grid)
+    assert not optimizer.is_complete(folder, retuned)
 
 
 # ---------------------------------------------------------------------------------- artifacts
