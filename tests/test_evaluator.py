@@ -271,6 +271,15 @@ class TestCoordinateConvention:
         self._run("", self.ABSOLUTE)
         assert "normalized" not in capsys.readouterr().out
 
+    def test_a_corner_past_the_frame_is_still_normalized(self, capsys):
+        """
+        A fitted OBB may extend past the frame, so a normalized set can hold -0.005 or 1.008.
+        A strict [0, 1] test read that as absolute pixels and warned over correct numbers.
+        """
+        past_the_edge = "0 -0.005 0.0926 0.0781 0.0926 0.0781 1.008 -0.005 1.008\n"
+        self._run(past_the_edge, self.NORMALIZED)
+        assert "normalized" not in capsys.readouterr().out
+
 
 def test_looks_normalized_reports_none_for_an_empty_frame():
     assert looks_normalized([]) is None

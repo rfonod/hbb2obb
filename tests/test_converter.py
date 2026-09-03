@@ -561,6 +561,28 @@ class TestSavePolygonAnnotations(unittest.TestCase):
         self.assertEqual(len(parts), 9, "Fallback line should be a label plus four points")
         self.assertEqual(parts[1:], obb_lines[1].split()[1:], "Fallback polygon should equal its OBB row")
 
+    def test_fallback_matches_its_obb_when_normalized(self):
+        """
+        The fallback used to truncate to int before normalizing while the OBB writer did not, so
+        the two row-aligned files could disagree by up to a pixel on the same object.
+        """
+        img_shape = (640, 480)
+        with tempfile.TemporaryDirectory() as tmp:
+            img_path = Path(tmp) / "images" / "sample.jpg"
+            save_obb_annotations(self.obb_annotations, Path(tmp) / "obb", img_path, normalize=True, img_shape=img_shape)
+            save_polygon_annotations(
+                self.contours,
+                self.obb_annotations,
+                Path(tmp) / "poly",
+                img_path,
+                normalize=True,
+                img_shape=img_shape,
+            )
+            obb_lines = (Path(tmp) / "obb" / "sample.txt").read_text().splitlines()
+            polygon_lines = (Path(tmp) / "poly" / "sample.txt").read_text().splitlines()
+
+        self.assertEqual(polygon_lines[1].split()[1:], obb_lines[1].split()[1:])
+
     def test_row_aligned_with_obb_file(self):
         """The polygon file has one line per OBB, in the same order"""
         with tempfile.TemporaryDirectory() as tmp:

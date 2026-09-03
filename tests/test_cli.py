@@ -1,5 +1,6 @@
 """Tests for the top-level `hbb2obb` command line, mostly its help output."""
 
+import argparse
 import re
 from pathlib import Path
 
@@ -74,6 +75,28 @@ def test_precision_without_normalize_is_refused(monkeypatch, capsys):
         cli.main_hbb2obb()
     assert exc.value.code == 2
     assert "--precision applies to normalized output" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("value", ["-1", "0", "18"])
+def test_an_unusable_precision_is_refused(monkeypatch, capsys, value):
+    """
+    A negative precision is a format-string error rather than a coordinate, and zero decimals
+    write every normalized coordinate as 0 or 1. Both used to reach the writer.
+    """
+    monkeypatch.setattr("sys.argv", ["hbb2obb", "images", "--normalize", "--precision", value])
+    with pytest.raises(SystemExit) as exc:
+        cli.main_hbb2obb()
+    assert exc.value.code == 2
+    assert "--precision must be between 1 and 17" in capsys.readouterr().err
+
+
+def test_zero_precision_is_allowed_for_absolute_pixels():
+    """Whole pixels are a real request; only normalized output needs a decimal to survive."""
+    parser = argparse.ArgumentParser()
+    cli.check_precision(parser, 0, normalize=False)  # must not raise
+
+    with pytest.raises(SystemExit):
+        cli.check_precision(parser, 0, normalize=True)
 
 
 def test_normalize_is_offered_by_the_conversion_command(monkeypatch, capsys):
