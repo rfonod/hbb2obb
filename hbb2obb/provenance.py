@@ -244,6 +244,18 @@ REPRODUCIBILITY = [
 ]
 
 
+def coordinate_convention(normalize: bool, precision: Optional[int]) -> str:
+    """
+    The one line that says which convention a set of labels is in, and how finely.
+
+    The decimals belong here because they change the bytes: a set rewritten at a different
+    precision is a different set, and a record that omits them does not reproduce it. They are
+    absent where the writer has none to give, as the conversion's absolute output is integral.
+    """
+    convention = "normalized to [0, 1]" if normalize else "absolute pixels"
+    return convention + (f", {precision} decimals" if precision is not None else "")
+
+
 def write_conversion_provenance(
     out: Path,
     img_source: Optional[Path],
@@ -259,6 +271,7 @@ def write_conversion_provenance(
     models_dir: Path = Path("models"),
     notes: Sequence[str] = (),
     normalize: bool = False,
+    precision: Optional[int] = None,
 ) -> int:
     """Record the settings an `hbb2obb` conversion actually ran with."""
     command = ["hbb2obb", str(img_source) if img_source else "<img_source>"]
@@ -274,6 +287,8 @@ def write_conversion_provenance(
         command += ["--confidence_source", confidence_source]
     if normalize:
         command += ["--normalize"]
+        if precision is not None:
+            command += ["--precision", str(precision)]
     if device:
         command += ["--device", device]
     if model_kwargs:
@@ -293,7 +308,7 @@ def write_conversion_provenance(
         f"Scale factor(s)          : {' '.join(str(s) for s in scale_factors)}",
         f"Opening kernel           : {opening_kernel_percentage}",
         f"Confidence source        : {confidence_source}",
-        f"Coordinates              : {'normalized to [0, 1]' if normalize else 'absolute pixels'}",
+        f"Coordinates              : {coordinate_convention(normalize, precision)}",
         f"Inference device         : {device if device else 'ultralytics default'}",
     ]
     if model_kwargs:
@@ -341,6 +356,8 @@ def write_detection_provenance(
     model_kwargs: Optional[str] = None,
     device: Optional[str] = None,
     notes: Sequence[str] = (),
+    normalize: bool = False,
+    precision: Optional[int] = None,
 ) -> int:
     """Record the detector that drew a set of horizontal boxes."""
     command = ["hbb2obb-detect", str(img_source) if img_source else "<img_source>"]
@@ -353,6 +370,10 @@ def write_detection_provenance(
         command += ["--device", device]
     if merged_with:
         command += ["--merge_with", str(merged_with)]
+    if normalize:
+        command += ["--normalize"]
+    if precision is not None:
+        command += ["--precision", str(precision)]
     if model_kwargs:
         command += ["--model_kwargs", model_kwargs]
 
@@ -370,6 +391,7 @@ def write_detection_provenance(
         f"Confidence threshold     : {conf}",
         f"NMS IoU threshold        : {iou}",
         f"Classes kept             : {' '.join(str(c) for c in classes) if classes else 'all'}",
+        f"Coordinates              : {coordinate_convention(normalize, precision)}",
         f"Inference device         : {device if device else 'ultralytics default'}",
     ]
     if model_kwargs:

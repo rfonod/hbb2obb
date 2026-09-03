@@ -296,3 +296,93 @@ def test_benchmark_provenance_lists_each_checkpoint_once(tmp_path):
     text = out.read_text()
     assert text.count(hashlib.sha256(b"sam_b.pt").hexdigest()) == 1
     assert text.count(hashlib.sha256(b"sam_l.pt").hexdigest()) == 1
+
+
+def test_conversion_provenance_records_the_coordinate_convention(tmp_path):
+    """
+    A normalized set rewritten at another precision is a different set, so the record has to
+    carry both or the command it prints does not reproduce the labels it sits beside.
+    """
+    out = tmp_path / "PROVENANCE.txt"
+    provenance.write_conversion_provenance(
+        out=out,
+        img_source=tmp_path / "images",
+        hbb_dir=None,
+        obb_dir=None,
+        sam_models=["sam_b"],
+        imgsz=1280,
+        scale_factors=[0.05],
+        opening_kernel_percentage=0.15,
+        models_dir=tmp_path / "models",
+        normalize=True,
+        precision=6,
+    )
+
+    text = out.read_text()
+    assert "--normalize --precision 6" in text
+    assert "Coordinates              : normalized to [0, 1], 6 decimals" in text
+
+
+def test_absolute_conversion_output_claims_no_decimals(tmp_path):
+    """The conversion writes whole pixels when it is not normalizing, so there are none to name."""
+    out = tmp_path / "PROVENANCE.txt"
+    provenance.write_conversion_provenance(
+        out=out,
+        img_source=tmp_path / "images",
+        hbb_dir=None,
+        obb_dir=None,
+        sam_models=["sam_b"],
+        imgsz=1280,
+        scale_factors=[0.05],
+        opening_kernel_percentage=0.15,
+        models_dir=tmp_path / "models",
+    )
+
+    text = out.read_text()
+    assert "Coordinates              : absolute pixels\n" in text
+    assert "--normalize" not in text
+    assert "--precision" not in text
+
+
+def test_detection_provenance_records_the_coordinate_convention(tmp_path):
+    """
+    hbb2obb-detect writes decimals in either convention, and used to record neither, so its
+    command reproduced absolute whole pixels whatever the run had actually written.
+    """
+    out = tmp_path / "PROVENANCE_hbb.txt"
+    provenance.write_detection_provenance(
+        out=out,
+        img_source=tmp_path / "images",
+        hbb_dir=None,
+        model="geotrax",
+        weights=None,
+        imgsz=1920,
+        conf=0.25,
+        iou=0.45,
+        normalize=True,
+        precision=8,
+    )
+
+    text = out.read_text()
+    assert "--normalize --precision 8" in text
+    assert "Coordinates              : normalized to [0, 1], 8 decimals" in text
+
+
+def test_detection_provenance_records_absolute_decimals(tmp_path):
+    """Absolute detector output is not integral: its precision changes the bytes too."""
+    out = tmp_path / "PROVENANCE_hbb.txt"
+    provenance.write_detection_provenance(
+        out=out,
+        img_source=tmp_path / "images",
+        hbb_dir=None,
+        model="geotrax",
+        weights=None,
+        imgsz=1920,
+        conf=0.25,
+        iou=0.45,
+        precision=2,
+    )
+
+    text = out.read_text()
+    assert "--precision 2" in text
+    assert "Coordinates              : absolute pixels, 2 decimals" in text
