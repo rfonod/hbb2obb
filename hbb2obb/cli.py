@@ -45,6 +45,25 @@ ENTRY_POINTS_EPILOG = (
 DETECTION_PROVENANCE_NAME = "PROVENANCE_hbb.txt"
 
 
+# Beyond this a float has no digits left to give, so the extra decimals are formatting noise.
+MAX_PRECISION = 17
+
+
+def check_precision(parser: argparse.ArgumentParser, precision: int, normalize: bool) -> None:
+    """
+    Reject a ``--precision`` that cannot be written, or that would flatten the coordinates.
+
+    A negative value is a format-string error rather than a coordinate, and zero decimals turn
+    every normalized coordinate into 0 or 1. Zero is fine for absolute pixels, which the writers
+    round to whole numbers anyway.
+    """
+    if precision is None:
+        return
+    floor = 1 if normalize else 0
+    if not floor <= precision <= MAX_PRECISION:
+        parser.error(f"--precision must be between {floor} and {MAX_PRECISION}, got {precision}")
+
+
 def provenance_path(label_dir: Path, name: str = "PROVENANCE.txt") -> Path:
     """
     Where a conversion's or detection's PROVENANCE.txt goes: beside the label directory, not in it.
@@ -263,6 +282,7 @@ def main_hbb2obb():
     # integral and has none. Accepting it silently would look like it did something.
     if args.precision is not None and not args.normalize:
         parser.error("--precision applies to normalized output; add --normalize or drop it")
+    check_precision(parser, args.precision, args.normalize)
     precision = args.precision if args.precision is not None else DEFAULT_NORMALIZED_PRECISION
 
     model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
@@ -454,6 +474,8 @@ def main_hbb2obb_detect():
     args = parser.parse_args()
 
     check_for_updates_once()
+
+    check_precision(parser, args.precision, args.normalize)
 
     import cv2
     import numpy as np
@@ -707,6 +729,7 @@ def main_hbb2obb_convert():
         raise SystemExit(run_verify(args))
     if not args.to:
         parser.error("--to is required unless --verify is used")
+    check_precision(parser, args.precision, args.normalize)
 
     from hbb2obb import formats
 

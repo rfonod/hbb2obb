@@ -311,16 +311,21 @@ def looks_normalized(boxes):
     Returns None for a frame with no boxes, which says nothing either way and must not be read as
     an answer. A box wholly inside the top-left pixel would be misread, which no real object is.
 
+    The bound carries the same 1% tolerance Ultralytics allows, because a fitted OBB may extend
+    past the frame it was fitted in: a normalized set holding a corner at -0.005 or 1.008 is
+    still a normalized set, and reading it as absolute pixels would raise the warning this
+    answers over numbers that are correct.
+
     Args:
         boxes (list): Boxes as returned by parse_obb_file.
 
     Returns:
-        bool | None: True if every coordinate sits in [0, 1], None if there are no boxes.
+        bool | None: True if every coordinate sits in [-0.01, 1.01], None if there are no boxes.
     """
     coordinates = [v for box in boxes for point in box['points'] for v in point]
     if not coordinates:
         return None
-    return all(0.0 <= v <= 1.0 for v in coordinates)
+    return all(-0.01 <= v <= 1.01 for v in coordinates)
 
 
 def calculate_obb_iou(poly1, poly2):

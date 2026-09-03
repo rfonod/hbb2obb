@@ -810,8 +810,10 @@ def save_polygon_annotations(
     with open(save_filepath, "w", encoding="utf-8") as f:
         for i, obb in enumerate(obb_annotations):
             if contours[i] is None:
-                # Fallback: reuse the OBB corners so both files stay in agreement
-                points = np.array(obb[1:], dtype=np.int32).reshape(-1, 2)
+                # Fallback: reuse the OBB corners so both files stay in agreement. Left at full
+                # precision, since coordinate_fields is what turns absolute output integral and
+                # rounding here first would put the normalized polygon a pixel off its own OBB.
+                points = np.asarray(obb[1:], dtype=np.float64).reshape(-1, 2)
             else:
                 points = simplify_contour(contours[i], simplify_epsilon)
             line = f"{int(obb[0])} " + coordinate_fields(
