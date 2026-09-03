@@ -141,7 +141,7 @@ hbb2obb-eval data/labels_obb_gt data/labels_obb -mp data/classes.yaml
 hbb2obb-view data/images --compare data/labels_obb_gt
 ```
 
-Converted OBB annotations are written to `data/labels_obb/`. Every command takes `--help`.
+Converted OBB annotations are written to `data/labels_obb/`. Every command takes `--help`. For your own data you need only the images and horizontal boxes for them; [`data/README.md`](data/README.md) walks through what each file in the sample is and the command that produced it.
 
 ## Usage
 
@@ -351,12 +351,13 @@ Green is the OBB, white its source HBB, red the segmentation polygon it was fitt
 
 | Key | | Key | |
 | :--- | :--- | :--- | :--- |
-| `q` / `Esc` | quit | `h` | show or hide the HBBs |
-| `n` / `p`, arrows | next / previous frame | `l` | show or hide the class labels |
-| wheel, `+` / `-` | zoom, about the cursor | `d` | show or hide boxes flagged `difficult` |
-| `f` / `0` | fit the frame | `c` | color by confidence, and print it |
-| `1` | zoom to 100% | `g` | show or hide the segmentation polygons |
-| `s` | save the current view | `x` | cycle the comparison overlay |
+| `q` / `Esc` | quit | `o` | show or hide the OBBs |
+| `n` / `p`, arrows | next / previous frame | `h` | show or hide the HBBs |
+| wheel, `+` / `-` | zoom, about the cursor | `l` | show or hide the class labels |
+| `f` / `0` | fit the frame | `d` | show or hide boxes flagged `difficult` |
+| `1` | zoom to 100% | `c` | color by confidence, and print it |
+| `s` | save the current view | `g` | show or hide the segmentation polygons |
+| | | `x` | cycle the comparison overlay |
 
 Drag with the left mouse button to pan. `--crops` writes a contact sheet of the individual objects instead.
 
