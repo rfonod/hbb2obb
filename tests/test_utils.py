@@ -165,6 +165,16 @@ class TestAnnotations:
         assert ann.normalized is True
         np.testing.assert_allclose(ann.hbb_xyxy, [[1, 80, 40, 120, 60]])
 
+    def test_the_whole_file_decides_the_convention(self, tmp_path, img):
+        """
+        A small absolute box on the first line used to read the rest of the file as relative,
+        because the decision was taken from that line's centre alone.
+        """
+        ann = _annotations(tmp_path, "0 1 1 2 2\n1 100 50 40 20\n", img)
+
+        assert ann.normalized is False
+        np.testing.assert_allclose(ann.hbb_xyxy[1], [1, 80, 40, 120, 60])
+
     def test_absolute_xyxy(self, tmp_path, img):
         """The xyxy input format is parsed as corner coordinates."""
         ann = _annotations(tmp_path, "2 80 40 120 60\n", img, input_format="xyxy")

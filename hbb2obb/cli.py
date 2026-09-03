@@ -64,6 +64,25 @@ def check_precision(parser: argparse.ArgumentParser, precision: int, normalize: 
         parser.error(f"--precision must be between {floor} and {MAX_PRECISION}, got {precision}")
 
 
+def warn_if_precision_loses_pixels(precision: int, img_shape) -> bool:
+    """
+    Say so when normalized output is being written at too few decimals to be read back exactly.
+
+    Returns True once the warning has been printed, so a caller looping over frames says it once.
+    """
+    from hbb2obb.formats import sufficient_precision
+
+    needed = sufficient_precision(img_shape)
+    if precision >= needed:
+        return False
+    print(
+        f"Warning: --precision {precision} does not survive the round trip on a "
+        f"{img_shape[0]}x{img_shape[1]} frame, so reading these labels back moves boxes. "
+        f"Use {needed} or more."
+    )
+    return True
+
+
 def provenance_path(label_dir: Path, name: str = "PROVENANCE.txt") -> Path:
     """
     Where a conversion's or detection's PROVENANCE.txt goes: beside the label directory, not in it.
@@ -294,6 +313,7 @@ def main_hbb2obb():
     confidence_dir = Path(args.confidence_dir) if args.confidence_dir else None
     want_confidence = args.save_confidence or write_confidence_dir
 
+    warned_precision = False
     image_paths = get_image_paths(args.img_source)
     for img_path in tqdm.tqdm(image_paths, desc="Processing images", leave=True, disable=args.no_bar):
         result = hbb2obb(
@@ -333,6 +353,8 @@ def main_hbb2obb():
             img_shape = image_size(img_path)
             if img_shape is None:
                 raise SystemExit(f"cannot read the image size of {img_path}, needed by --normalize")
+            if not warned_precision:
+                warned_precision = warn_if_precision_loses_pixels(precision, img_shape)
 
         save_obb_annotations(
             obb_annotations,
@@ -503,6 +525,7 @@ def main_hbb2obb_detect():
     model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
     totals = {"boxes": 0, "matched": 0, "missed": 0, "extra": 0, "conflicts": 0}
     counts = {}
+    warned_precision = False
 
     for img_path in tqdm.tqdm(image_paths, desc="Detecting HBBs", leave=True, disable=args.no_bar):
         img = cv2.imread(str(img_path))
@@ -510,6 +533,8 @@ def main_hbb2obb_detect():
             print(f"Warning: could not read {img_path}, skipping")
             continue
         img_shape = (img.shape[1], img.shape[0])
+        if args.normalize and not warned_precision:
+            warned_precision = warn_if_precision_loses_pixels(args.precision, img_shape)
 
         detected = detect_hbb(
             img,
@@ -736,6 +761,11 @@ def main_hbb2obb_convert():
     sizes = formats.image_sizes(args.images)
     default_size = (args.img_width, args.img_height) if args.img_width and args.img_height else None
     names = resolve_names(args.map_path, args.source, [])
+
+    # The largest frame is the one that needs the most decimals, so checking it covers the set.
+    known_sizes = list(sizes.values()) + ([default_size] if default_size else [])
+    if args.normalize and args.precision is not None and known_sizes:
+        warn_if_precision_loses_pixels(args.precision, max(known_sizes, key=max))
 
     frames, discovered, src_format = formats.read_set(args.source, args.src_format, names or None, sizes, default_size)
     names = names or discovered

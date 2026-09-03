@@ -75,6 +75,8 @@ data/
 
 All three sets ship in three formats apiece. The YOLO TXT file is canonical in each case and the others are one common rounding of it, so every derived format below is written **from the `.txt`** (`-f yolo`), never from another derived file.
 
+Every `.txt` here is in absolute pixels, which is what the commands below produce and what DOTA and COCO are derived from. `hbb2obb`, `hbb2obb-detect` and `hbb2obb-convert` all take `--normalize` to write the relative form Ultralytics trains on instead; the readers detect either, so a normalized set converts and displays the same way.
+
 Unlike the 50-frame tuning set released with Songdo Vision OBB, the HBBs here are **not** the axis-aligned envelopes of the ground-truth OBBs, and the two sets are not row-aligned: one is detected, the other drawn by hand. They do not describe quite the same objects, which is what step 5 measures.
 
 ## Reproducing This Folder

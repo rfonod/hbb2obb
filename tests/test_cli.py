@@ -90,6 +90,19 @@ def test_an_unusable_precision_is_refused(monkeypatch, capsys, value):
     assert "--precision must be between 1 and 17" in capsys.readouterr().err
 
 
+def test_a_precision_that_cannot_round_trip_is_flagged(capsys):
+    """
+    Reading a normalized set multiplies by the frame size, so too few decimals move the boxes.
+    Written labels are still valid, hence a warning rather than a refusal.
+    """
+    assert cli.warn_if_precision_loses_pixels(3, (3840, 2160)) is True
+    out = capsys.readouterr().out
+    assert "3840x2160" in out and "Use 6 or more" in out
+
+    assert cli.warn_if_precision_loses_pixels(6, (3840, 2160)) is False
+    assert capsys.readouterr().out == ""
+
+
 def test_zero_precision_is_allowed_for_absolute_pixels():
     """Whole pixels are a real request; only normalized output needs a decimal to survive."""
     parser = argparse.ArgumentParser()

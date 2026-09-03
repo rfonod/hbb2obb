@@ -17,6 +17,8 @@ import psutil
 import torch
 import yaml
 
+from hbb2obb.formats import looks_normalized
+
 
 class Annotations:
     def __init__(self, filepath: list, img: np.ndarray, input_format: str = "xywh"):
@@ -49,9 +51,10 @@ class Annotations:
             self.hbb_scores = np.empty((0,))
             return np.empty((0, 5))
 
-        # Decide on normalization from the first non-blank line
-        xc, yc = map(float, lines[0][1:3])
-        self.normalized = 0 <= xc <= 1 and 0 <= yc <= 1
+        # Decide on normalization from every coordinate in the file, the same test the readers in
+        # formats.py apply. Deciding from the first line's centre alone read the rest of the file
+        # on the strength of one box.
+        self.normalized = bool(looks_normalized([float(v) for line in lines for v in line[1:5]]))
 
         hbb_xyxy = []
         hbb_scores = []
