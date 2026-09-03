@@ -182,7 +182,14 @@ def expand_runs(
 
 # -------------------------------------------------------------------------------------- sweep
 def is_complete(folder: Path, spec: RunSpec) -> bool:
-    """Whether a run folder already holds a full grid of results, for --resume."""
+    """
+    Whether a run folder already holds this run's full grid of results, for --resume.
+
+    The grid points on disk must be the ones the spec asks for, not merely as many of them.
+    A benchmark whose axes were edited between attempts, an image size dropped after it ran out
+    of memory most of all, would otherwise resume straight past the runs that measured the old
+    grid and report their numbers under the new config.
+    """
     results_file = folder / RESULTS_NAME
     if not results_file.is_file():
         return False
@@ -191,7 +198,13 @@ def is_complete(folder: Path, spec: RunSpec) -> bool:
             data = yaml.safe_load(f) or {}
     except yaml.YAMLError:
         return False
-    return len(data.get("all_results") or []) == len(spec.grid)
+
+    measured = {
+        (int(r["imgsz"]), float(r["scale_factor"]), float(r["opening_kernel_percentage"]))
+        for r in (data.get("all_results") or [])
+        if {"imgsz", "scale_factor", "opening_kernel_percentage"} <= set(r)
+    }
+    return measured == {(int(i), float(sf), float(ok)) for i, sf, ok in spec.grid}
 
 
 def sweep(
