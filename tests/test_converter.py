@@ -670,6 +670,77 @@ class TestDeviceForwarding(unittest.TestCase):
         self.assertEqual(shared, {})
 
 
+class TestDeviceResultRelease(unittest.TestCase):
+    """
+    Full-resolution masks must not stay on the inference device once they are on the host.
+
+    Ultralytics keeps the Results it returned on ``predictor.results``, so an ensemble that holds
+    every member loaded at once holds one frame of device-side masks per member. At 3840x2160
+    that is over a gigabyte each, and it is what runs a 24 GB card out of memory partway through
+    a multi-model sweep.
+    """
+
+    class _FakePredictor:
+        def __init__(self):
+            self.results = None
+
+    class _FakeMasks:
+        data = np.zeros((1, 200, 200), dtype=bool)
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return self
+
+    class _FakeResult:
+        masks = None
+
+    class _FakeModel:
+        def __init__(self, masks):
+            self.predictor = TestDeviceResultRelease._FakePredictor()
+            self.results_at_return = []
+            self._masks = masks
+
+        def __call__(self, _img, **_kwargs):
+            result = TestDeviceResultRelease._FakeResult()
+            result.masks = self._masks
+            # What ultralytics does: keep a reference to what it just handed back
+            self.predictor.results = [result]
+            return [result]
+
+    def setUp(self):
+        self.models = {name: self._FakeModel(self._FakeMasks()) for name in ("sam_b", "sam_l")}
+        self._orig_loader = converter.load_sam_model
+        converter.load_sam_model = lambda name: self.models[name]
+
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.img_path = root / "images" / "sample.jpg"
+        self.img_path.parent.mkdir()
+        cv2.imwrite(str(self.img_path), np.zeros((200, 200, 3), np.uint8))
+        self.hbb_dir = root / "labels_hbb"
+        self.hbb_dir.mkdir()
+        (self.hbb_dir / "sample.txt").write_text("0 100 100 40 40\n")
+
+    def tearDown(self):
+        converter.load_sam_model = self._orig_loader
+        self.tmp.cleanup()
+
+    def test_every_model_in_the_ensemble_is_released(self):
+        converter.hbb2obb(img_path=self.img_path, hbb_dir=self.hbb_dir, sam_models=["sam_b", "sam_l"])
+        for name, model in self.models.items():
+            self.assertIsNone(model.predictor.results, f"{name} still pins its device-side masks")
+
+    def test_a_model_that_produced_no_masks_is_released_too(self):
+        self.models["sam_b"] = self._FakeModel(None)
+        converter.hbb2obb(img_path=self.img_path, hbb_dir=self.hbb_dir, sam_models=["sam_b"])
+        self.assertIsNone(self.models["sam_b"].predictor.results)
+
+    def test_a_model_with_no_predictor_yet_is_not_an_error(self):
+        converter.release_device_results(object())
+
+
 if __name__ == "__main__":
     unittest.main()
 
