@@ -44,6 +44,7 @@ PLOT_NAME = "plot.png"
 BENCHMARK_SUMMARY_NAME = "summary.md"
 BENCHMARK_PLOT_NAME = "comparison.png"
 BENCHMARK_PROVENANCE_NAME = "PROVENANCE.txt"
+AUTO_PLOT_METRICS = ("median_angle_error", "iou_at_90")
 
 # What a benchmark YAML may say, at each level. Anything else is a typo, and a typo in a file
 # that drives a six-hour unattended run should fail immediately rather than silently do the

@@ -1530,6 +1530,38 @@ def main_hbb2obb_optimize():
     )
     print(f"\nWrote {summary}")
 
+    # Draw the metrics the search did not rank by, unless the caller asked for one specific metric.
+    # They are already recorded at every grid point, so this runs no SAM and takes about a second;
+    # doing it here means the figures exist without anyone having to remember a second command.
+    # Each lands under its own name, so nothing above is overwritten.
+    if plot and args.plot_metric is None:
+        from hbb2obb import plotting
+
+        for extra in optimizer.AUTO_PLOT_METRICS:
+            drawn = 0
+            for folder in sorted(p for p in output_folder.iterdir() if (p / optimizer.RESULTS_NAME).is_file()):
+                try:
+                    plotting.run_plot(folder, metric=extra)
+                except ValueError:
+                    continue  # this run predates the metric; the others may still have it
+                drawn += 1
+            if not drawn:
+                continue
+            extra_summary = optimizer.write_summary(
+                output_folder,
+                rows,
+                img_source,
+                hbb_dir,
+                gt_dir,
+                command,
+                elapsed_seconds=None,
+                plot=plot,
+                provenance=wrote_provenance or (output_folder / optimizer.BENCHMARK_PROVENANCE_NAME).is_file(),
+                config_name=config_copy.name if config_copy else None,
+                metric=extra,
+            )
+            print(f"Wrote {extra_summary}")
+
 
 def _default_benchmark_dir(img_source: Path) -> Path:
     """Where a sweep writes when no output folder is given: beside the image directory."""
