@@ -21,7 +21,7 @@ from __future__ import annotations
 import colorsys
 import os
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, NamedTuple, Optional, Sequence
 
 import matplotlib
 
@@ -40,6 +40,105 @@ MARKERS = ['s', '^', 'o', 'D', 'P', '*', 'X']
 # The lightness a kernel ladder runs between, lightest kernel first. Kept clear of both ends so
 # no shade washes out against the white ground or goes dark enough to lose its hue.
 SHADE_RANGE = (0.70, 0.30)
+
+
+class Metric(NamedTuple):
+    """
+    One plottable quantity: how to read it out of a grid point and how to label it.
+
+    A sweep records several scores per grid point and only one of them is the objective. Average
+    IoU saturates on tight boxes, so two settings can tie on it while differing plainly in
+    orientation or in the share of boxes they get nearly right; the plot has to be able to show
+    those. Selection is unaffected: the optimizer still ranks by average IoU, and this only
+    decides what a figure draws.
+    """
+
+    value: Callable[[dict], Optional[float]]
+    error: Callable[[dict], Optional[float]]
+    axis_label: str
+    annotation: Callable[[dict], str]
+    higher_is_better: bool
+    ylim_pad: float
+
+
+def _fraction_at(threshold: str) -> Callable[[dict], Optional[float]]:
+    """Read one rung of the IoU ladder out of a grid point, tolerating a row that has none."""
+
+    def read(row: dict) -> Optional[float]:
+        fractions = row.get("iou_fractions") or {}
+        return fractions.get(threshold)
+
+    return read
+
+
+METRICS = {
+    "avg_iou": Metric(
+        value=lambda r: r.get("avg_iou"),
+        error=lambda r: r.get("std_iou"),
+        axis_label="Average IoU (with ±std)",
+        annotation=lambda r: f"IoU={r['avg_iou']:.4f}±{r['std_iou']:.4f}",
+        higher_is_better=True,
+        ylim_pad=0.05,
+    ),
+    "median_iou": Metric(
+        value=lambda r: r.get("median_iou"),
+        error=lambda r: None,
+        axis_label="Median IoU",
+        annotation=lambda r: f"median IoU={r['median_iou']:.4f}",
+        higher_is_better=True,
+        ylim_pad=0.05,
+    ),
+    "median_angle_error": Metric(
+        value=lambda r: r.get("median_angle_error"),
+        error=lambda r: None,
+        axis_label="Median orientation error (degrees)",
+        annotation=lambda r: f"angle={r['median_angle_error']:.2f}°",
+        higher_is_better=False,
+        ylim_pad=0.5,
+    ),
+    "p90_angle_error": Metric(
+        value=lambda r: r.get("p90_angle_error"),
+        error=lambda r: None,
+        axis_label="90th percentile orientation error (degrees)",
+        annotation=lambda r: f"p90 angle={r['p90_angle_error']:.2f}°",
+        higher_is_better=False,
+        ylim_pad=0.5,
+    ),
+    "iou_at_75": Metric(
+        value=_fraction_at("0.75"),
+        error=lambda r: None,
+        axis_label="Share of matched boxes at IoU ≥ 0.75",
+        annotation=lambda r: f"IoU≥0.75: {_fraction_at('0.75')(r):.1%}",
+        higher_is_better=True,
+        ylim_pad=0.05,
+    ),
+    "iou_at_90": Metric(
+        value=_fraction_at("0.90"),
+        error=lambda r: None,
+        axis_label="Share of matched boxes at IoU ≥ 0.90",
+        annotation=lambda r: f"IoU≥0.90: {_fraction_at('0.90')(r):.1%}",
+        higher_is_better=True,
+        ylim_pad=0.05,
+    ),
+}
+
+DEFAULT_METRIC = "avg_iou"
+
+
+def resolve_metric(metric: Optional[str]) -> Metric:
+    """Look up a metric by name, naming the alternatives when the name is not one of them."""
+    name = metric or DEFAULT_METRIC
+    if name not in METRICS:
+        raise ValueError(f"unknown plot metric {name!r}; choose one of {', '.join(sorted(METRICS))}")
+    return METRICS[name]
+
+
+def best_row(results: Sequence[dict], metric: Metric) -> Optional[dict]:
+    """The grid point a metric likes most, skipping rows that never recorded it."""
+    scored = [r for r in results if metric.value(r) is not None]
+    if not scored:
+        return None
+    return (max if metric.higher_is_better else min)(scored, key=metric.value)
 
 
 def load_results(benchmark_dir: Path) -> dict:
@@ -67,31 +166,40 @@ def run_name_of(benchmark_dir: Path) -> str:
     return os.path.basename(benchmark_dir)
 
 
-def organize_data_by_series(results: Sequence[dict]) -> dict:
+def organize_data_by_series(results: Sequence[dict], metric: Optional[Metric] = None) -> dict:
     """Organize sweep results into one series per (image size, opening kernel) pair.
 
     Results produced before the opening kernel became a swept axis have no
     'opening_kernel_percentage' key; those series are keyed with a kernel of None and
     are labelled by image size alone, exactly as they were before.
+
+    The plotted quantity is read through ``metric``, so the series carry a neutral 'value' and
+    'error' rather than one score's own names. A grid point measured before a metric existed
+    reports None for it and is left out of that metric's series instead of plotting as zero.
     """
+    metric = metric or METRICS[DEFAULT_METRIC]
     data_by_series = {}
 
     for result in results:
+        value = metric.value(result)
+        if value is None:
+            continue
         key = (result['imgsz'], result.get('opening_kernel_percentage'))
         if key not in data_by_series:
-            data_by_series[key] = {'scale_factors': [], 'avg_iou': [], 'std_iou': [], 'execution_time': []}
+            data_by_series[key] = {'scale_factors': [], 'value': [], 'error': [], 'execution_time': []}
 
+        error = metric.error(result)
         data_by_series[key]['scale_factors'].append(result['scale_factor'])
-        data_by_series[key]['avg_iou'].append(result['avg_iou'])
-        data_by_series[key]['std_iou'].append(result['std_iou'])
+        data_by_series[key]['value'].append(value)
+        data_by_series[key]['error'].append(0.0 if error is None else error)
         data_by_series[key]['execution_time'].append(result['execution_time'])
 
     # Sort data points by scale factor
     for data in data_by_series.values():
         idx = np.argsort(data['scale_factors'])
         data['scale_factors'] = np.array(data['scale_factors'])[idx]
-        data['avg_iou'] = np.array(data['avg_iou'])[idx]
-        data['std_iou'] = np.array(data['std_iou'])[idx]
+        data['value'] = np.array(data['value'])[idx]
+        data['error'] = np.array(data['error'])[idx]
         data['execution_time'] = np.array(data['execution_time'])[idx]
 
     return data_by_series
@@ -144,8 +252,11 @@ def create_plot(
     output: Optional[Path] = None,
     dpi: int = 300,
     no_time: bool = False,
+    metric: Optional[Metric] = None,
 ) -> None:
     """Render one sweep and write it to ``output``."""
+    metric = metric or METRICS[DEFAULT_METRIC]
+    best_value = metric.value(best_params)
 
     plt.figure()
 
@@ -188,12 +299,13 @@ def create_plot(
         else:
             marker_sizes = [80] * len(data['scale_factors'])  # Fixed size
 
-        # Plot the IoU values with error bars
-        plt.errorbar(data['scale_factors'], data['avg_iou'], yerr=data['std_iou'], fmt='none', ecolor=color, alpha=0.3)
+        # Plot the values with error bars, where the metric has an error to draw
+        if np.any(data['error']):
+            plt.errorbar(data['scale_factors'], data['value'], yerr=data['error'], fmt='none', ecolor=color, alpha=0.3)
 
         plt.scatter(
             data['scale_factors'],
-            data['avg_iou'],
+            data['value'],
             s=marker_sizes,
             color=color,
             marker=marker,
@@ -204,7 +316,7 @@ def create_plot(
         )
 
         # Add lines connecting points
-        plt.plot(data['scale_factors'], data['avg_iou'], color=color, alpha=0.6, linestyle='-', linewidth=1.5)
+        plt.plot(data['scale_factors'], data['value'], color=color, alpha=0.6, linestyle='-', linewidth=1.5)
 
         # Add to legend
         legend_elements.append(
@@ -234,7 +346,7 @@ def create_plot(
 
     plt.scatter(
         best_params['scale_factor'],
-        best_params['avg_iou'],
+        best_value,
         s=best_marker_size,
         color='gold',
         marker='*',
@@ -247,13 +359,13 @@ def create_plot(
 
     # Add text annotation for best parameters with adaptive placement
     x_best = best_params['scale_factor']
-    y_best = best_params['avg_iou']
+    y_best = best_value
 
     # Collect points in each quadrant
     quadrant_points = {'top_right': [], 'top_left': [], 'bottom_right': [], 'bottom_left': []}
 
     for data in data_by_series.values():
-        for sf, iou in zip(data['scale_factors'], data['avg_iou']):
+        for sf, iou in zip(data['scale_factors'], data['value']):
             if sf == x_best and iou == y_best:
                 continue  # Skip the best point itself
 
@@ -286,9 +398,8 @@ def create_plot(
 
     best_label = series_label(best_params['imgsz'], best_params.get('opening_kernel_percentage'), multiple_kernels)
     plt.annotate(
-        f"Best: {best_label}, SF={best_params['scale_factor']:.3f}\n"
-        f"IoU={best_params['avg_iou']:.4f}±{best_params['std_iou']:.4f}",
-        xy=(best_params['scale_factor'], best_params['avg_iou']),
+        f"Best: {best_label}, SF={best_params['scale_factor']:.3f}\n" + metric.annotation(best_params),
+        xy=(best_params['scale_factor'], best_value),
         xytext=xytext,
         textcoords='offset points',
         bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5),
@@ -344,11 +455,11 @@ def create_plot(
 
     plt.title(title)
     plt.xlabel("Scale Factor")
-    plt.ylabel("Average IoU (with ±std)")
+    plt.ylabel(metric.axis_label)
     plt.grid(True, linestyle='--', alpha=0.6)
 
     # Set decent axis limits
-    plt.ylim(bottom=max(0, min([min(d['avg_iou']) for d in data_by_series.values()]) - 0.05))
+    plt.ylim(bottom=max(0, min([min(d['value']) for d in data_by_series.values()]) - metric.ylim_pad))
 
     # Add vertical line at scale_factor = 0
     plt.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
@@ -373,22 +484,47 @@ def create_plot(
     plt.close()
 
 
-def run_plot(benchmark_dir: Path, output: Optional[Path] = None, dpi: int = 300, no_time: bool = False) -> Path:
-    """Render ``benchmark_dir/results.yaml`` into ``benchmark_dir/plot.png``."""
+def run_plot(
+    benchmark_dir: Path,
+    output: Optional[Path] = None,
+    dpi: int = 300,
+    no_time: bool = False,
+    metric: Optional[str] = None,
+) -> Path:
+    """
+    Render ``benchmark_dir/results.yaml`` into ``benchmark_dir/plot.png``.
+
+    The default metric is the one the sweep optimised, and its plot is what it always was. Any
+    other metric marks the grid point *that* metric likes best, which is the whole point of
+    asking for it: the interesting question is whether it is the same point.
+    """
+    spec = resolve_metric(metric)
     data = load_results(benchmark_dir)
     results = data.get('all_results', [])
     best_params = data.get('best_parameters', {})
     if not results or not best_params:
         raise ValueError(f"{benchmark_dir}/results.yaml holds no usable results")
 
+    # The file's own best point is the objective's winner, so it is used unchanged for the
+    # objective and recomputed for anything else.
+    if metric not in (None, DEFAULT_METRIC):
+        best_params = best_row(results, spec)
+        if best_params is None:
+            raise ValueError(f"{benchmark_dir}/results.yaml holds no grid point recording {metric!r}")
+
+    series = organize_data_by_series(results, spec)
+    if not series:
+        raise ValueError(f"{benchmark_dir}/results.yaml holds no grid point recording {metric!r}")
+
     output = output or benchmark_dir / "plot.png"
     create_plot(
-        organize_data_by_series(results),
+        series,
         best_params,
         title=f"HBB2OBB Benchmark Results: {run_name_of(benchmark_dir)}",
         output=output,
         dpi=dpi,
         no_time=no_time,
+        metric=spec,
     )
     return output
 
@@ -404,20 +540,27 @@ def use_log_scale(times: Sequence[float]) -> bool:
     return bool(times) and min(times) > 0 and max(times) / min(times) >= 4
 
 
-def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300) -> Path:
+def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300, metric: Optional[str] = None) -> Path:
     """
-    Render one point per run: its best average IoU against what that grid point cost.
+    Render one point per run: its best score against what that grid point cost.
 
     This is the picture a benchmark of several model ensembles is actually for. A per-run plot
     can only say which scale factor won inside one ensemble; only this one says whether the
     extra models were worth their time.
+
+    Rows that never recorded the requested metric are left out rather than drawn at zero, so a
+    folder holding runs from before a metric existed still renders the runs that have it.
     """
+    spec = resolve_metric(metric)
+    rows = [r for r in rows if spec.value(r) is not None]
+    if not rows:
+        raise ValueError(f"no run recorded {metric!r}; nothing to compare")
     # Wider than the per-run plots: a run is labelled by every model in it, so a five-model
     # ensemble carries a forty-character name that needs somewhere to go.
     plt.figure(figsize=(11, 6.2))
 
     times = [r['execution_time'] for r in rows]
-    ious = [r['avg_iou'] for r in rows]
+    ious = [spec.value(r) for r in rows]
     sizes = [40 + 45 * len(r['sam_models']) for r in rows]
     colors = [COLORS[(len(r['sam_models']) - 1) % len(COLORS)] for r in rows]
 
@@ -478,14 +621,20 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300) -> Path:
 
     # The Pareto front: the runs no other run beats on both accuracy and time
     def dominated(row):
-        return any(o['avg_iou'] > row['avg_iou'] and o['execution_time'] < row['execution_time'] for o in rows)
+        # "Better" follows the metric: a run is off the front when another is both cheaper and
+        # better, and for orientation error better means smaller.
+        if spec.higher_is_better:
+            beats = lambda other: spec.value(other) > spec.value(row)  # noqa: E731
+        else:
+            beats = lambda other: spec.value(other) < spec.value(row)  # noqa: E731
+        return any(beats(o) and o['execution_time'] < row['execution_time'] for o in rows)
 
     front = sorted((r for r in rows if not dominated(r)), key=lambda r: r['execution_time'])
     pareto_legend = None
     if len(front) > 1:
         plt.plot(
             [r['execution_time'] for r in front],
-            [r['avg_iou'] for r in front],
+            [spec.value(r) for r in front],
             color='gray',
             linestyle='--',
             linewidth=1.2,
@@ -515,7 +664,11 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300) -> Path:
         plt.gca().add_artist(pareto_legend)  # the second legend() call would otherwise replace it
 
     plt.xlabel("Execution time of the best grid point (s)")
-    plt.ylabel("Average IoU at the best grid point")
+    plt.ylabel(
+        "Average IoU at the best grid point"
+        if spec is METRICS[DEFAULT_METRIC]
+        else f"{spec.axis_label} at the best grid point"
+    )
     plt.title("HBB2OBB Benchmark: accuracy against compute")
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()

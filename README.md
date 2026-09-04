@@ -14,7 +14,7 @@
 - 🛡️ **Spatially constrained & safe**: region-specific masking and contour refinement keep segmentation inside the object, and a fallback keeps the original HBB when no valid mask is found.
 - 🔎 **Confidence-scored output**: every OBB gets a quality score in `[0, 1]` that flags silent fallbacks and low-confidence conversions, so you know which boxes to trust; your detector's own confidence can be carried through instead of, or on top of, that score (see [Confidence scores](#confidence-scores)).
 - 📐 **Flexible scaling**: positive or negative scale factors (optionally different for the short and long sides) recover cropped object parts or tighten overly conservative annotations.
-- 📊 **Evaluate & optimize**: built-in IoU evaluation against ground truth plus `hbb2obb-optimize`, a hyperparameter search over SAM inference resolution × scale factors × opening kernel, driven by a config file so a whole benchmark is one reproducible command ([details](#tuning-hyperparameters)).
+- 📊 **Evaluate & optimize**: evaluation against ground truth on IoU, orientation error and the share of boxes above a high IoU bar, plus `hbb2obb-optimize`, a hyperparameter search over SAM inference resolution × scale factors × opening kernel, driven by a config file so a whole benchmark is one reproducible command ([details](#tuning-hyperparameters)).
 - 🔄 **Six annotation formats**: read and write YOLO, DOTA, Pascal VOC, COCO and LabelMe, for horizontal and oriented boxes alike, with a check that proves every format encodes the same boxes ([details](#converting-between-formats)).
 - 🔍 **Interactive viewer**: `hbb2obb-view` pans and zooms over your annotations, in any format, coloring boxes by confidence and overlaying predictions against ground truth ([details](#inspecting-annotations)).
 - ⚙️ **CLI + Python API**: `hbb2obb`, `hbb2obb-detect`, `hbb2obb-eval`, `hbb2obb-convert`, `hbb2obb-view` and `hbb2obb-optimize` commands plus an importable API, with transparent visualizations of every step.
@@ -29,7 +29,7 @@
 - **Model ensemble**: combine multiple models via majority voting for enhanced accuracy.
 - **Confidence scoring**: a per-OBB quality score flags fallbacks and low-confidence conversions for triage, optionally combined with the detector confidence from the input, written as an extra column or to a side-car directory that leaves the label files standard ([details](#confidence-scores)).
 - **Polygon output**: optionally save the segmentation contour behind each OBB, row-aligned with the OBB file, as a tighter object outline for downstream masking ([details](#data-format)).
-- **Evaluation tools**: assess OBB accuracy against ground truth using IoU metrics.
+- **Evaluation tools**: assess OBB accuracy against ground truth on mean and median IoU, orientation error, and the share of matched boxes above IoU 0.5, 0.75, 0.85 and 0.9, overall and per class.
 - **Hyperparameter optimization**: search SAM inference resolutions, HBB scale factors and opening kernels for the best settings on your data, one sweep at a time or a whole benchmark from a config file.
 - **Provenance records**: `--save_provenance` writes the command, the versions, a digest of the source that ran and the SHA-256 of every checkpoint, so a released annotation set can be regenerated rather than trusted.
 - **Visualization tools**: render HBBs, segmentation masks, derived contours, and resulting OBBs.
@@ -41,7 +41,7 @@
 <details>
 <summary><b>🚀 Planned Enhancements</b></summary>
 
-- **Improved morphological operations**: more advanced operations for better mask refinement.
+- **Improved morphological operations**: more advanced operations for better mask refinement, beyond the signed opening/closing kernel.
 - **Support for other segmentation models**: extend compatibility beyond the SAM/FastSAM families.
 
 </details>
@@ -172,6 +172,30 @@ hbb2obb /path/to/images --save_polygon --polygon_dir /path/to/save/polygons
 hbb2obb-eval /path/to/ground_truth /path/to/predictions
 ```
 
+Predictions are paired with ground truth by oriented IoU and scored on three things:
+
+```
+Average IoU: 0.8964 ± 0.0683
+Median IoU: 0.9108
+Matched Boxes Above Threshold: IoU>=0.50: 100.0%  IoU>=0.75: 98.0%  IoU>=0.85: 80.5%  IoU>=0.90: 57.0%
+Orientation Error: median 1.04°, mean 2.11° ± 4.88°, p90 4.40°
+
+=== Results by Class ===
+     Class  GT  Pred  Matches IoU (mean ± std) Angle err (median °)
+       Car 185   186      185  0.8982 ± 0.0606                 1.00
+       Bus   6     6        6  0.9358 ± 0.0353                 1.33
+     Truck   8     8        8  0.8533 ± 0.1469                 1.56
+Motorcycle   2     1        1  0.6746 ± 0.0000                 9.95
+```
+
+Mean IoU alone is a blunt instrument on tight boxes: it saturates, so two settings can tie on it
+while differing plainly in the heading they recover. The other two do not saturate. In the run
+above the mean hides a heavy orientation tail (median 1.04°, p90 4.40°) and a class that the
+conversion handles far worse than the rest.
+
+Orientation is taken from each box's longer side and wraps at 180°, since a box turned end for
+end is the same box, so the largest possible error is 90°.
+
 <details>
 <summary><b>More CLI arguments</b></summary>
 
@@ -182,7 +206,7 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--sam_models` / `-sm`: SAM model(s) to use (e.g. `sam_b`, `sam_l`, `sam2_b`, `sam2.1_b`, `sam3`, `mobile_sam`, `FastSAM-s`).
 - `--imgsz`: SAM inference resolution (default: 1280).
 - `--scale_factors` / `-sf`: factor(s) to scale HBBs (single value, or two values for short/long sides).
-- `--opening_kernel_percentage` / `-okp`: morphological opening kernel size as a percentage of the mask's smaller dimension.
+- `--opening_kernel_percentage` / `-okp`: morphological kernel size as a fraction of the mask's smaller dimension. **Positive opens** (erodes then dilates, removing thin protrusions), **negative closes** (dilates then erodes, filling holes and rejoining a fragmented mask), `0` disables it. Closing matters because only the largest contour is kept, so a vehicle split by glare or an occluding pole loses the smaller piece otherwise.
 - `--save_confidence`: append a per-OBB [confidence score](#confidence-scores) as a 10th column in the output TXT files.
 - `--confidence_dir` / `-cd`: write those scores to their own directory instead, one score per line, row-aligned with the labels. Use it when the label files have to stay strictly standard, since Ultralytics and other YOLO OBB readers reject a 10th column. Give it bare for `img_source/../labels_confidence`.
 - `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
@@ -399,7 +423,7 @@ A COCO file is named `coco_annotations_<kind>.json` unless `--coco_name` says ot
 
 ## Tuning Hyperparameters
 
-`hbb2obb-optimize` grid-searches inference resolution x scale factor x opening kernel for a set of SAM models, scoring each point by average IoU against ground-truth OBBs:
+`hbb2obb-optimize` grid-searches inference resolution x scale factor x opening kernel for a set of SAM models, ranking each point by average IoU against ground-truth OBBs:
 
 ```bash
 hbb2obb-optimize /path/to/images /path/to/ground_truth -sm sam_b sam_l sam2_b sam2.1_b -n multi_sam
@@ -411,13 +435,39 @@ hbb2obb-optimize /path/to/images /path/to/ground_truth -sm sam_b sam_l sam2_b sa
 The grid is the full product of `--imgsz` x `--scale_factors` x `--opening_kernels`, and each grid point is a complete SAM pass over the whole image set, so the cost multiplies quickly: the defaults (3 image sizes, 12 scale factors, 1 opening kernel) already amount to 36 passes, and sweeping three kernels instead of one triples that to 108. `--opening_kernels` / `-ok` defaults to the single value `0.15`, so omitting it leaves the two-axis sweep and its grid size unchanged.
 
 ```bash
-# Add the opening kernel as a third axis (2 x 3 x 3 = 18 grid points)
-hbb2obb-optimize /path/to/images /path/to/ground_truth -iz 960 1280 -sf 0.03 0.05 0.07 -ok 0.0 0.15 0.3
+# Add the morphological kernel as a third axis (2 x 3 x 5 = 30 grid points).
+# Negative values close instead of open, so one axis covers both directions with 0 in the middle.
+hbb2obb-optimize /path/to/images /path/to/ground_truth -iz 960 1280 -sf 0.03 0.05 0.07 \
+    -ok -0.3 -0.15 0.0 0.15 0.3
 ```
 
 A run writes `run_config.yaml`, `results.yaml`, `summary.txt` and `plot.png` into `<output_folder>/<name>`, and `summary.md`, `comparison.png` and `PROVENANCE.txt` into the output folder itself. The plot gives each series a hue by image size and, when more than one opening kernel was swept, a lightness of that hue and a marker shape by kernel, so no two of the swept combinations share a colour. Marker area is the execution time.
 
 `--device` (e.g. `cpu`, `0`, `cuda:0`, `mps`) applies to every run and overrides any `device` set in the config.
+
+</details>
+
+<details>
+<summary><b>Plotting a metric other than the one being optimized</b></summary>
+
+Every grid point records more than the score it is ranked by, and `--plot_metric` / `-pm` chooses which of them the figures draw:
+
+| value | what it draws |
+| :--- | :--- |
+| `avg_iou` | mean IoU with ±std error bars (default) |
+| `median_iou` | median IoU |
+| `median_angle_error` | median orientation error, in degrees |
+| `p90_angle_error` | 90th percentile orientation error |
+| `iou_at_75`, `iou_at_90` | share of matched boxes above that IoU |
+
+```bash
+# Redraw an existing sweep against orientation error, running no SAM passes at all
+hbb2obb-optimize -c benchmark.yaml --refresh --plot_metric median_angle_error
+```
+
+The search itself always ranks by average IoU, so a sweep stays comparable with one measured before these existed. Only the figures change. A metric knows whether higher or lower is better, so the Pareto front on `comparison.png` flips for an error metric, and a run plot stars the grid point *that* metric prefers, which is worth looking at precisely when it is not the one that won.
+
+This matters when the scores are tight. Average IoU saturates on well-fitted boxes, so a benchmark can put every configuration inside a few thousandths of the next and still be hiding a real difference in the headings they recover.
 
 </details>
 

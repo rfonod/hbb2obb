@@ -178,16 +178,21 @@ Total Matched Boxes: 200
 Total Unmatched GT Boxes: 1
 Total Unmatched Pred Boxes: 1
 Average IoU: 0.8964 ± 0.0683
+Median IoU: 0.9108
+Matched Boxes Above Threshold: IoU>=0.50: 100.0%  IoU>=0.75: 98.0%  IoU>=0.85: 80.5%  IoU>=0.90: 57.0%
+Orientation Error: median 1.04°, mean 2.11° ± 4.88°, p90 4.40°
 
 === Results by Class ===
-Class  GT  Pred  Matches IoU (mean ± std)
-    0 185   186      185  0.8982 ± 0.0606
-    1   6     6        6  0.9358 ± 0.0353
-    2   8     8        8  0.8533 ± 0.1469
-    3   2     1        1  0.6746 ± 0.0000
+Class  GT  Pred  Matches IoU (mean ± std) Angle err (median °)
+    0 185   186      185  0.8982 ± 0.0606                 1.00
+    1   6     6        6  0.9358 ± 0.0353                 1.33
+    2   8     8        8  0.8533 ± 0.1469                 1.56
+    3   2     1        1  0.6746 ± 0.0000                 9.95
 ```
 
 The one unmatched box on each side is the pair from step 1: the motorcycle the detector missed has no converted box, and the edge-cut car it found has no ground truth box. Everything the detector did find converted, and matched. The evaluator ignores the trailing confidence column, so it reads the converted files as they are written in step 2. For more options, such as excluding specific classes, class-agnostic matching or a different IoU threshold, run `hbb2obb-eval --help`.
+
+The three scores answer different questions and only the first saturates. Class 3, the single matched motorcycle, is where they disagree most: its IoU of 0.67 is poor but readable, while its 9.95° of orientation error against 1.00° for cars says plainly that a short, nearly square box is the case this conversion handles worst.
 
 ### 6. Regenerate the benchmark folders
 
@@ -221,6 +226,8 @@ hbb2obb-view data/images --obb_format dota             # read the DOTA files ins
 ## Benchmark Results
 
 The `benchmark_results` directory holds the sweeps described in step 6, one subfolder per set of SAM models. They are shipped **for illustration**: to show what the optimizer produces and what its artifacts look like. They are measured against the boxes this folder ships, so step 6 reproduces them.
+
+They were measured before the orientation error and the IoU ladder were recorded, so their `results.yaml` files hold neither. The readers cope with that rather than crashing: `--refresh` leaves those columns empty, and `--plot_metric` on one of the newer metrics reports that no grid point recorded it. A fresh run of step 6 fills them in.
 
 **[`benchmark_results/summary.md`](benchmark_results/summary.md) is the generated write-up:** every run's best grid point in one table, sorted by IoU, with the winner named and `comparison.png` showing accuracy against compute. [`benchmark_results/PROVENANCE.txt`](benchmark_results/PROVENANCE.txt) records the checkpoint hashes, the hashes of the label sets the numbers were measured against, a digest of the hbb2obb source that ran, the library versions and the command. Both are written by the command that produces the runs, and `benchmark.yaml` is copied in beside them.
 
