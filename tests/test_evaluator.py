@@ -1,15 +1,20 @@
 import tempfile
 from pathlib import Path
 
+import numpy as np
+import pytest
 from shapely.geometry import Polygon
 
 from hbb2obb.evaluator import (
     calculate_obb_iou,
     evaluate_obb,
     format_bbox,
+    iou_fractions,
     is_edge_box,
     looks_normalized,
     match_boxes,
+    obb_orientation,
+    orientation_error,
     parse_obb_file,
     print_results,
 )
@@ -292,3 +297,68 @@ def parse_obb_file_from_text(text):
         path = Path(temp_dir) / 'f.txt'
         path.write_text(text)
         return parse_obb_file(path)
+
+
+class TestOrientationMetrics:
+    """
+    The scores that exist because the mean IoU saturates.
+
+    On tight aerial boxes the mean sits near 0.88 for every setting worth considering, so two
+    configurations can tie on it while differing plainly in the heading they recover. These are
+    reported beside it, never optimized in its place.
+    """
+
+    @staticmethod
+    def rotated(degrees, width=40.0, height=20.0):
+        """A ``width`` x ``height`` rectangle turned ``degrees`` about the origin."""
+        radians = np.radians(degrees)
+        rotation = np.array([[np.cos(radians), -np.sin(radians)], [np.sin(radians), np.cos(radians)]])
+        corners = np.array([[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]])
+        return [tuple(rotation @ corner) for corner in corners]
+
+    def test_orientation_follows_the_longer_side(self):
+        assert obb_orientation(self.rotated(0)) == pytest.approx(0.0)
+        assert obb_orientation(self.rotated(30)) == pytest.approx(30.0)
+        assert obb_orientation(self.rotated(120)) == pytest.approx(120.0)
+
+    def test_orientation_ignores_which_corner_came_first(self):
+        """A box has no first corner, so reading its corners backwards is the same box."""
+        corners = self.rotated(37)
+        assert obb_orientation(list(reversed(corners))) == pytest.approx(obb_orientation(corners))
+
+    def test_a_box_end_for_end_is_the_same_box(self):
+        """Orientations are equal modulo 180 degrees, so 179 against 1 is two degrees apart."""
+        assert orientation_error(self.rotated(1), self.rotated(179)) == pytest.approx(2.0)
+        assert orientation_error(self.rotated(0), self.rotated(180)) == pytest.approx(0.0)
+
+    def test_a_right_angle_is_the_worst_disagreement(self):
+        assert orientation_error(self.rotated(0), self.rotated(90)) == pytest.approx(90.0)
+        assert orientation_error(self.rotated(10), self.rotated(100)) == pytest.approx(90.0)
+
+    def test_a_square_still_answers(self):
+        """Aspect ratio 1 leaves the axis genuinely ambiguous; it must not raise."""
+        assert 0.0 <= obb_orientation(self.rotated(20, width=30.0, height=30.0)) < 180.0
+
+    def test_the_iou_ladder_counts_matches_at_or_above_each_bar(self):
+        fractions = iou_fractions([0.4, 0.8, 0.86, 0.95])
+        assert fractions == {"0.50": 0.75, "0.75": 0.75, "0.85": 0.5, "0.90": 0.25}
+
+    def test_an_empty_ladder_is_zero_rather_than_missing(self):
+        """A grid point that matched nothing still has to write every column."""
+        assert iou_fractions([]) == {"0.50": 0.0, "0.75": 0.0, "0.85": 0.0, "0.90": 0.0}
+
+    def test_evaluating_a_set_against_itself_reports_no_error(self, gt_dir):
+        results = evaluate_obb(gt_dir=gt_dir, pred_dir=gt_dir, iou_threshold=0.1)
+        assert results["median_angle_error"] == pytest.approx(0.0)
+        assert results["p90_angle_error"] == pytest.approx(0.0)
+        assert results["iou_fractions"]["0.90"] == pytest.approx(1.0)
+        assert results["median_iou"] == pytest.approx(1.0)
+
+    def test_the_new_scores_ride_along_with_a_real_evaluation(self, gt_dir, pred_dir):
+        results = evaluate_obb(gt_dir=gt_dir, pred_dir=pred_dir, iou_threshold=0.1)
+        assert 0.0 <= results["median_angle_error"] <= 90.0
+        assert results["median_angle_error"] <= results["p90_angle_error"]
+        assert set(results["iou_fractions"]) == {"0.50", "0.75", "0.85", "0.90"}
+        # The ladder can only fall as the bar rises
+        shares = [results["iou_fractions"][k] for k in ("0.50", "0.75", "0.85", "0.90")]
+        assert shares == sorted(shares, reverse=True)

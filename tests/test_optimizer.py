@@ -15,7 +15,7 @@ from hbb2obb import optimizer
 from hbb2obb.cli import SUPPORTED_SAM_MODELS, main_hbb2obb_optimize
 
 
-def grid_point(imgsz=1280, sf=0.05, ok=0.15, iou=0.9):
+def grid_point(imgsz=1280, sf=0.05, ok=0.15, iou=0.9, angle=2.5):
     """One entry of all_results, with every key the writers read."""
     return {
         "imgsz": imgsz,
@@ -23,6 +23,12 @@ def grid_point(imgsz=1280, sf=0.05, ok=0.15, iou=0.9):
         "opening_kernel_percentage": ok,
         "avg_iou": iou,
         "std_iou": 0.07,
+        "median_iou": iou + 0.01,
+        "iou_fractions": {"0.50": 1.0, "0.75": 0.94, "0.85": 0.73, "0.90": 0.41},
+        "median_angle_error": angle,
+        "avg_angle_error": angle + 0.4,
+        "std_angle_error": 1.2,
+        "p90_angle_error": angle + 3.0,
         "total_matches": 200,
         "total_gt": 201,
         "total_pred": 201,
@@ -487,3 +493,56 @@ def test_the_summary_covers_runs_this_invocation_did_not_touch(monkeypatch, tmp_
     summary = (tmp_path / "bench" / optimizer.BENCHMARK_SUMMARY_NAME).read_text()
     assert "sam_l sam_b" in summary
     assert "2 run(s)" in summary
+
+
+# --------------------------------------------------------------------------- the plot metric
+def test_an_unknown_plot_metric_stops_before_any_sweep_runs(monkeypatch, tmp_path):
+    """
+    A typo must not surface hours in, with the grid already measured and the plot the last step.
+    """
+    swept = []
+    monkeypatch.setattr(optimizer, "sweep", lambda spec, *a, **k: swept.append(spec.name))
+    monkeypatch.setattr("hbb2obb.converter.clear_model_cache", lambda: None)
+
+    config = write_config(tmp_path)
+    with pytest.raises(SystemExit):
+        run_cli(monkeypatch, "-c", str(config), "--plot_metric", "orientaton")
+
+    assert swept == []
+    assert not (tmp_path / "bench").exists()
+
+
+def test_a_typo_in_the_plot_metric_names_the_real_ones(monkeypatch, tmp_path):
+    config = write_config(tmp_path)
+    with pytest.raises(SystemExit) as excinfo:
+        run_cli(monkeypatch, "-c", str(config), "--plot_metric", "orientaton")
+
+    message = str(excinfo.value)
+    assert "unknown plot metric" in message
+    assert "median_angle_error" in message
+
+
+def test_refreshing_on_a_metric_a_run_never_recorded_says_so(monkeypatch, tmp_path, capsys):
+    """
+    A benchmark measured before a metric existed has nothing to draw for it. That is a fact about
+    those runs, not a failure of the refresh: it must report them and still write the summary.
+    """
+    bench = tmp_path / "bench"
+    (bench / "sam_b").mkdir(parents=True)
+    points = [{k: v for k, v in grid_point(sf=sf).items() if "angle" not in k} for sf in (0.04, 0.05)]
+    for point in points:
+        point.pop("iou_fractions")
+    with open(bench / "sam_b" / optimizer.RESULTS_NAME, "w", encoding="utf-8") as f:
+        yaml.dump({"all_results": points, "best_parameters": points[-1]}, f)
+    with open(bench / "sam_b" / optimizer.RUN_CONFIG_NAME, "w", encoding="utf-8") as f:
+        yaml.dump({"run_name": "sam_b", "sam_models": ["sam_b"]}, f)
+
+    config = write_config(tmp_path)
+    run_cli(monkeypatch, "-c", str(config), "--refresh", "--plot_metric", "median_angle_error")
+
+    assert "Skipping sam_b" in capsys.readouterr().out
+    summary = (bench / optimizer.BENCHMARK_SUMMARY_NAME).read_text(encoding="utf-8")
+    assert "No accuracy-against-compute figure" in summary
+    # The table is still written, with the columns it cannot fill left empty rather than faked
+    assert "| Models | Image size" in summary
+    assert "| - | - |" in summary

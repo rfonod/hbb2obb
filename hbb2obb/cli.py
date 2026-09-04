@@ -1280,6 +1280,17 @@ def main_hbb2obb_optimize():
         help="Additional keyword arguments for model in format 'key1=value1,key2=value2'",
     )
     parser.add_argument("--no_plot", action="store_true", help="Do not render any plot")
+    parser.add_argument(
+        "--plot_metric",
+        "-pm",
+        type=str,
+        default=None,
+        help=(
+            "Quantity the plots draw (default: avg_iou, the one the search optimizes). The others "
+            "are reported but never optimized, and exist because the mean saturates on tight boxes: "
+            "median_iou, median_angle_error, p90_angle_error, iou_at_75, iou_at_90"
+        ),
+    )
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
 
     args = parser.parse_args()
@@ -1292,6 +1303,16 @@ def main_hbb2obb_optimize():
     from hbb2obb.utils import get_hbb_dir
 
     plot = not args.no_plot
+
+    # Validate the metric before a sweep starts rather than when its first plot is drawn: a typo
+    # here would otherwise surface hours in, with the grid already measured.
+    if args.plot_metric is not None:
+        from hbb2obb import plotting
+
+        try:
+            plotting.resolve_metric(args.plot_metric)
+        except ValueError as e:
+            raise SystemExit(str(e)) from e
 
     if args.config:
         config = optimizer.load_config(args.config)
@@ -1419,7 +1440,7 @@ def main_hbb2obb_optimize():
 
             outcome = optimizer.sweep(spec, img_source, gt_dir, hbb_dir, no_bar=True)
             config_dict = optimizer.run_config_dict(spec, img_source, gt_dir, hbb_dir)
-            optimizer.write_run(run_folder, spec, outcome, config_dict, plot=plot)
+            optimizer.write_run(run_folder, spec, outcome, config_dict, plot=plot, metric=args.plot_metric)
             optimizer.print_best(outcome["best_parameters"], run_folder)
 
             # Release the checkpoints before the next ensemble loads its own
@@ -1431,7 +1452,13 @@ def main_hbb2obb_optimize():
             from hbb2obb import plotting
 
             for folder in sorted(p for p in output_folder.iterdir() if (p / optimizer.RESULTS_NAME).is_file()):
-                print(f"Rendering {plotting.run_plot(folder)}")
+                # A folder measured before this metric existed records nothing to draw. That is a
+                # fact about that run, not a failure of the refresh, so say it and keep going: the
+                # other runs in the same benchmark may well have it.
+                try:
+                    print(f"Rendering {plotting.run_plot(folder, metric=args.plot_metric)}")
+                except ValueError as e:
+                    print(f"Skipping {folder.name}: {e}")
 
     elapsed = time.time() - started
 
@@ -1493,6 +1520,7 @@ def main_hbb2obb_optimize():
         plot=plot,
         provenance=wrote_provenance or (output_folder / optimizer.BENCHMARK_PROVENANCE_NAME).is_file(),
         config_name=config_copy.name if config_copy else None,
+        metric=args.plot_metric,
     )
     print(f"\nWrote {summary}")
 

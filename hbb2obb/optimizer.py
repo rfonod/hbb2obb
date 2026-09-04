@@ -238,12 +238,12 @@ def sweep(
 
     if not quiet:
         print(f"Loaded {len(spec.sam_models)} model(s) in {model_load_seconds:.1f}s: {' '.join(spec.sam_models)}")
-        print("-" * 116)
+        print("-" * 124)
         print(
-            f"{'Image Size':<12} {'Scale Factor':<15} {'Kernel':<10} {'Avg IoU':<17} {'Matches':<10} "
-            f"{'GT Total':<10} {'Pred Total':<10} {'IoU Threshold':<15} {'Time (s)':<10}"
+            f"{'Image Size':<12} {'Scale Factor':<15} {'Kernel':<10} {'Avg IoU':<17} {'Angle':<8} "
+            f"{'Matches':<10} {'GT Total':<10} {'Pred Total':<10} {'IoU Threshold':<15} {'Time (s)':<10}"
         )
-        print("-" * 116)
+        print("-" * 124)
 
     results: List[dict] = []
     best_iou = -1.0
@@ -296,6 +296,12 @@ def sweep(
                 "opening_kernel_percentage": float(ok),
                 "avg_iou": float(eval_results["avg_iou"]),
                 "std_iou": float(eval_results["std_iou"]),
+                "median_iou": float(eval_results["median_iou"]),
+                "iou_fractions": {k: float(v) for k, v in eval_results["iou_fractions"].items()},
+                "median_angle_error": float(eval_results["median_angle_error"]),
+                "avg_angle_error": float(eval_results["avg_angle_error"]),
+                "std_angle_error": float(eval_results["std_angle_error"]),
+                "p90_angle_error": float(eval_results["p90_angle_error"]),
                 "total_matches": int(eval_results["total_matches"]),
                 "total_gt": int(eval_results["total_gt"]),
                 "total_pred": int(eval_results["total_pred"]),
@@ -313,7 +319,8 @@ def sweep(
             if not quiet:
                 print(
                     f"{imgsz:<12} {sf:^15.3f} {ok:^10.3f} {param_result['avg_iou']:<1.4f} ± "
-                    f"{param_result['std_iou']:<1.4f}   {param_result['total_matches']:<10} "
+                    f"{param_result['std_iou']:<1.4f}   {param_result['median_angle_error']:<7.2f} "
+                    f"{param_result['total_matches']:<10} "
                     f"{param_result['total_gt']:<10} {param_result['total_pred']:<10} "
                     f"{spec.iou_threshold:<15} {execution_time:<10.2f}"
                 )
@@ -350,7 +357,9 @@ def run_config_dict(spec: RunSpec, img_source: Path, gt_dir: Path, hbb_dir: Path
     return config
 
 
-def write_run(folder: Path, spec: RunSpec, outcome: dict, config: dict, plot: bool = True) -> None:
+def write_run(
+    folder: Path, spec: RunSpec, outcome: dict, config: dict, plot: bool = True, metric: Optional[str] = None
+) -> None:
     """Write run_config.yaml, results.yaml, summary.txt and plot.png for one run."""
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -379,6 +388,17 @@ def write_run(folder: Path, spec: RunSpec, outcome: dict, config: dict, plot: bo
         f.write(f"  Scale Factor: {best['scale_factor']:.4f}\n")
         f.write(f"  Opening Kernel: {best['opening_kernel_percentage']:.4f}\n")
         f.write(f"  Average IoU: {best['avg_iou']:.4f} ± {best['std_iou']:.4f}\n")
+        f.write(f"  Median IoU: {best['median_iou']:.4f}\n")
+        f.write(
+            "  Matched Boxes Above Threshold: "
+            + "  ".join(f"IoU>={t}: {share:.1%}" for t, share in sorted(best['iou_fractions'].items()))
+            + "\n"
+        )
+        f.write(
+            f"  Orientation Error: median {best['median_angle_error']:.2f} deg, "
+            f"mean {best['avg_angle_error']:.2f} +/- {best['std_angle_error']:.2f} deg, "
+            f"p90 {best['p90_angle_error']:.2f} deg\n"
+        )
         f.write(f"  Total Matches: {best['total_matches']}\n")
         f.write(f"  Total GT: {best['total_gt']}\n")
         f.write(f"  Total Pred: {best['total_pred']}\n")
@@ -388,13 +408,15 @@ def write_run(folder: Path, spec: RunSpec, outcome: dict, config: dict, plot: bo
             f.write(
                 f"{i + 1:4d}. ImgSz: {result['imgsz']:5d}, SF: {result['scale_factor']:7.4f}, "
                 f"K: {result['opening_kernel_percentage']:7.4f}, IoU: {result['avg_iou']:7.4f} ± "
-                f"{result['std_iou']:7.4f}, Time: {result['execution_time']:5.2f}s\n"
+                f"{result['std_iou']:7.4f}, Angle: {result['median_angle_error']:6.2f} deg, "
+                f"IoU>=0.90: {result['iou_fractions']['0.90']:6.1%}, "
+                f"Time: {result['execution_time']:5.2f}s\n"
             )
 
     if plot:
         from hbb2obb import plotting
 
-        plotting.run_plot(folder)
+        plotting.run_plot(folder, metric=metric)
 
 
 # -------------------------------------------------------------------------------- aggregation
@@ -447,6 +469,7 @@ def write_summary(
     plot: bool = True,
     provenance: bool = False,
     config_name: Optional[str] = None,
+    metric: Optional[str] = None,
 ) -> Path:
     """
     Write the one document that reads every run together.
@@ -496,13 +519,19 @@ def write_summary(
     lines += [
         "## Best grid point per run",
         "",
-        "| Models | Image size | Scale factor | Kernel | Average IoU | Matches / GT | Time |",
-        "| :--- | ---: | ---: | ---: | :--- | ---: | ---: |",
+        "| Models | Image size | Scale factor | Kernel | Average IoU | Angle err | IoU>=0.9 | Matches / GT | Time |",
+        "| :--- | ---: | ---: | ---: | :--- | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
+        # A run measured before these metrics existed still belongs in the table, so the columns it
+        # cannot fill say so rather than crashing the summary of a folder that holds both.
+        angle = f"{row['median_angle_error']:.2f}°" if row.get("median_angle_error") is not None else "-"
+        high = row.get("iou_fractions") or {}
+        high = f"{high['0.90']:.1%}" if "0.90" in high else "-"
         lines.append(
             f"| `{' '.join(row['sam_models'])}` | {row['imgsz']} | {row['scale_factor']:g} | "
             f"{row['opening_kernel_percentage']:g} | {row['avg_iou']:.4f} ± {row['std_iou']:.4f} | "
+            f"{angle} | {high} | "
             f"{row['total_matches']} / {row['total_gt']} | {row['execution_time']:.1f} s |"
         )
 
@@ -512,21 +541,31 @@ def write_summary(
         f"{best['scale_factor']:g}, opening kernel {best['opening_kernel_percentage']:g}, "
         f"average IoU {best['avg_iou']:.4f} ± {best['std_iou']:.4f} in {best['execution_time']:.1f} s.",
         "",
+        "Runs are ranked by average IoU, which is the quantity the grid search optimises. The angle",
+        "and IoU>=0.9 columns are reported, never optimised: the mean saturates on tight boxes and",
+        "cannot separate settings that these two can, so they are what to read when two runs tie.",
+        "",
     ]
 
     if plot:
         from hbb2obb import plotting
 
-        plotting.comparison_plot(rows, output_folder / BENCHMARK_PLOT_NAME)
-        lines += [
-            "## Accuracy against compute",
-            "",
-            f"![Best IoU against execution time]({BENCHMARK_PLOT_NAME})",
-            "",
-            "Each point is one run at its best grid point. The dashed line is the Pareto front:",
-            "the runs that no other run beats on both accuracy and time.",
-            "",
-        ]
+        # No run recording the requested metric is a fact about the folder, not an error: the
+        # summary still has a table to write, so it says why the figure is missing and goes on.
+        try:
+            plotting.comparison_plot(rows, output_folder / BENCHMARK_PLOT_NAME, metric=metric)
+        except ValueError as e:
+            lines += [f"No accuracy-against-compute figure: {e}.", ""]
+        else:
+            lines += [
+                "## Accuracy against compute",
+                "",
+                f"![Best IoU against execution time]({BENCHMARK_PLOT_NAME})",
+                "",
+                "Each point is one run at its best grid point. The dashed line is the Pareto front:",
+                "the runs that no other run beats on both accuracy and time.",
+                "",
+            ]
 
     lines += [
         "## Per-run detail",

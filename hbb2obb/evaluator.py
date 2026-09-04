@@ -13,6 +13,50 @@ from shapely.geometry import Polygon
 from hbb2obb.formats import looks_normalized as coordinates_look_normalized
 from hbb2obb.utils import load_label_map
 
+# The IoU ladder reported beside the mean. The mean saturates once a conversion is good: on tight
+# aerial boxes it sits near 0.88 for every setting worth considering, and differences that matter
+# hide inside it. The share of boxes clearing a high bar does not saturate, and is how the
+# detection literature reports the same information.
+IOU_REPORT_THRESHOLDS = (0.5, 0.75, 0.85, 0.9)
+
+
+def obb_orientation(points) -> float:
+    """
+    Orientation of an oriented box in degrees, in [0, 180).
+
+    Taken from the box's longer side, so the value is the axis the object lies along. A rectangle
+    has no head and no tail, so orientations are equal modulo 180 degrees and the range says so.
+    """
+    corners = np.asarray(points, dtype=float)[:4]
+    edges = corners[[1, 2]] - corners[[0, 1]]
+    lengths = np.hypot(edges[:, 0], edges[:, 1])
+    longer = edges[int(np.argmax(lengths))]
+    return float(np.degrees(np.arctan2(longer[1], longer[0])) % 180.0)
+
+
+def orientation_error(points_a, points_b) -> float:
+    """
+    Absolute difference between two box orientations in degrees, in [0, 90].
+
+    Wraps at 180 degrees, since a box and the same box turned end for end are the same box, so the
+    worst possible disagreement is a right angle rather than a half turn.
+    """
+    difference = abs(obb_orientation(points_a) - obb_orientation(points_b)) % 180.0
+    return float(min(difference, 180.0 - difference))
+
+
+def iou_fractions(ious, thresholds=IOU_REPORT_THRESHOLDS) -> dict:
+    """
+    Share of matched pairs at or above each IoU threshold, keyed by the threshold as text.
+
+    Text keys because these land in a YAML results file that a person reads: a float key there
+    prints as 0.9 in one writer and 0.9000000000000001 in the next.
+    """
+    if not len(ious):
+        return {f"{t:.2f}": 0.0 for t in thresholds}
+    values = np.asarray(ious, dtype=float)
+    return {f"{t:.2f}": float((values >= t).mean()) for t in thresholds}
+
 
 def evaluate_obb(
     gt_dir,
@@ -66,10 +110,13 @@ def evaluate_obb(
     # Store results
     all_matches = []
     all_ious = []
+    all_angle_errors = []
     total_edge_cases = 0
     total_unmatched_gt = 0
     total_unmatched_pred = 0
-    class_stats = defaultdict(lambda: {'matches': 0, 'gt_total': 0, 'pred_total': 0, 'iou_sum': 0, 'iou_values': []})
+    class_stats = defaultdict(
+        lambda: {'matches': 0, 'gt_total': 0, 'pred_total': 0, 'iou_sum': 0, 'iou_values': [], 'angle_errors': []}
+    )
 
     # For class-agnostic evaluation, track matches where classes differ
     cross_class_matches = 0
@@ -146,17 +193,19 @@ def evaluate_obb(
         # Collect IoU values
         for gt_box, pred_box, iou in matches:
             all_ious.append(iou)
+            all_angle_errors.append(orientation_error(gt_box['points'], pred_box['points']))
 
             # Count cross-class matches in class-agnostic mode
             if class_agnostic and gt_box['label'] != pred_box['label']:
                 cross_class_matches += 1
 
         # Update per-class statistics
-        for gt_box, _, iou in matches:
+        for gt_box, pred_box, iou in matches:
             label = gt_box['label']
             class_stats[label]['matches'] += 1
             class_stats[label]['iou_sum'] += iou
             class_stats[label]['iou_values'].append(iou)
+            class_stats[label]['angle_errors'].append(orientation_error(gt_box['points'], pred_box['points']))
 
         # Count total GT and predicted/converted boxes per class
         for box in gt_boxes:
@@ -172,6 +221,18 @@ def evaluate_obb(
 
     # Calculate IoU statistics
     avg_iou, std_iou = (0, 0) if not all_ious else (np.mean(all_ious), np.std(all_ious))
+    median_iou = 0 if not all_ious else np.median(all_ious)
+
+    # Orientation statistics. The median leads because the distribution has a tail: a handful of
+    # boxes where the mask found the wrong axis land near 90 degrees and would drag a mean far
+    # from where the bulk of the boxes actually sit.
+    if not all_angle_errors:
+        avg_angle_error = median_angle_error = std_angle_error = p90_angle_error = 0
+    else:
+        avg_angle_error = np.mean(all_angle_errors)
+        median_angle_error = np.median(all_angle_errors)
+        std_angle_error = np.std(all_angle_errors)
+        p90_angle_error = np.percentile(all_angle_errors, 90)
 
     # Exclude edge cases from total GT count if requested
     if exclude_edge_cases:
@@ -183,6 +244,12 @@ def evaluate_obb(
         'total_pred': total_pred,
         'avg_iou': avg_iou,
         'std_iou': std_iou,
+        'median_iou': median_iou,
+        'iou_fractions': iou_fractions(all_ious),
+        'avg_angle_error': avg_angle_error,
+        'median_angle_error': median_angle_error,
+        'std_angle_error': std_angle_error,
+        'p90_angle_error': p90_angle_error,
         'class_stats': class_stats,
         'total_edge_cases': total_edge_cases,
         'exclude_edge_cases': exclude_edge_cases,
@@ -231,6 +298,18 @@ def print_results(results: dict, map_path: Path = None) -> None:
 
     print(f"Average IoU: {results['avg_iou']:.4f} ± {results['std_iou']:.4f}")
 
+    if results['total_matches']:
+        print(f"Median IoU: {results['median_iou']:.4f}")
+        fractions = results.get('iou_fractions') or {}
+        if fractions:
+            ladder = "  ".join(f"IoU>={threshold}: {share:.1%}" for threshold, share in sorted(fractions.items()))
+            print(f"Matched Boxes Above Threshold: {ladder}")
+        print(
+            f"Orientation Error: median {results['median_angle_error']:.2f}°, "
+            f"mean {results['avg_angle_error']:.2f}° ± {results['std_angle_error']:.2f}°, "
+            f"p90 {results['p90_angle_error']:.2f}°"
+        )
+
     if results['excluded_classes']:
         if label_map:
             excluded_names = [f"{label_map.get(cls, str(cls))} ({cls})" for cls in results['excluded_classes']]
@@ -256,17 +335,20 @@ def print_results(results: dict, map_path: Path = None) -> None:
 
             class_name = label_map.get(class_id, str(class_id)) if label_map else str(class_id)
 
+            median_class_angle = np.median(stats['angle_errors']) if stats['angle_errors'] else 0
+
             row = [
                 class_name,
                 stats['gt_total'],
                 stats['pred_total'],
                 stats['matches'],
                 f"{avg_class_iou:.4f} ± {std_class_iou:.4f}",
+                f"{median_class_angle:.2f}",
             ]
 
             table_data.append(row)
 
-        headers = ["Class", "GT", "Pred", "Matches", "IoU (mean ± std)"]
+        headers = ["Class", "GT", "Pred", "Matches", "IoU (mean ± std)", "Angle err (median °)"]
         df = pd.DataFrame(table_data, columns=headers)
         print(df.to_string(index=False))
 
