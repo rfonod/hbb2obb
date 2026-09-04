@@ -1395,7 +1395,10 @@ def main_hbb2obb_optimize():
             raise SystemExit(f"--only names run(s) that are not configured: {unknown}")
         specs = [s for s in specs if s.name in args.only]
 
-    hbb_dir = get_hbb_dir(img_source, hbb_dir)
+    # A --refresh renders from each run's results.yaml and reads no image, label or checkpoint, so
+    # it has to work on a results folder copied away from the data it was measured on. The path is
+    # still resolved, because the summary names it, but it is not required to be there.
+    hbb_dir = get_hbb_dir(img_source, hbb_dir, must_exist=not args.refresh)
 
     if args.dry_run or args.refresh:
         pass
