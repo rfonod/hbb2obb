@@ -853,3 +853,68 @@ class TestConfidenceSidecar(unittest.TestCase):
             img_path.parent.mkdir()
             save_confidence_annotations([0.5], None, img_path)
             self.assertTrue((Path(tmp) / "labels_confidence" / "sample.txt").is_file())
+
+
+class TestSignedMorphology(unittest.TestCase):
+    """
+    The morphological kernel is one signed axis: positive opens, negative closes, zero is off.
+
+    Closing earns its place because the caller keeps the largest contour only. A vehicle split by
+    glare or an occluding pole loses the smaller piece permanently, and this is the only step that
+    runs early enough to put it back.
+    """
+
+    @staticmethod
+    def split_blob():
+        """Two rectangles three pixels apart, with a thin spur off the side of the second."""
+        mask = np.zeros((60, 80), bool)
+        mask[20:40, 10:34] = True
+        mask[20:40, 37:50] = True
+        mask[29:31, 50:62] = True
+        return mask
+
+    @staticmethod
+    def fragments(mask):
+        contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        return len(contours)
+
+    def test_a_positive_kernel_opens_and_can_only_remove(self):
+        mask = self.split_blob()
+        opened = converter.apply_morphological_opening(mask, 0.2)
+        self.assertLess(opened.sum(), mask.sum())
+        self.assertFalse((opened & ~mask).any())  # nothing was added
+
+    def test_a_negative_kernel_closes_and_can_only_add(self):
+        mask = self.split_blob()
+        closed = converter.apply_morphological_opening(mask, -0.2)
+        self.assertGreater(closed.sum(), mask.sum())
+        self.assertFalse((~closed & mask).any())  # nothing was removed
+
+    def test_closing_rejoins_a_fragmented_mask(self):
+        """The point of the negative half of the axis: two pieces become one contour."""
+        mask = self.split_blob()
+        self.assertEqual(self.fragments(mask), 2)
+        self.assertEqual(self.fragments(converter.apply_morphological_opening(mask, -0.2)), 1)
+
+    def test_opening_does_not_rejoin_anything(self):
+        mask = self.split_blob()
+        self.assertEqual(self.fragments(converter.apply_morphological_opening(mask, 0.2)), 2)
+
+    def test_the_sign_chooses_the_operation_not_the_kernel_size(self):
+        """Equal magnitudes must differ only in direction, never in how far they reach."""
+        mask = self.split_blob()
+        opened = converter.apply_morphological_opening(mask, 0.2)
+        closed = converter.apply_morphological_opening(mask, -0.2)
+        self.assertNotEqual(opened.sum(), closed.sum())
+        # A closing then an opening at the same magnitude lands back inside the closing
+        self.assertTrue((converter.apply_morphological_opening(closed, 0.2) <= closed).all())
+
+    def test_zero_is_off_and_returns_the_mask_untouched(self):
+        mask = self.split_blob()
+        self.assertIs(converter.apply_morphological_opening(mask, 0.0), mask)
+
+    def test_an_empty_or_missing_mask_survives_either_sign(self):
+        for kernel in (0.2, -0.2):
+            self.assertIsNone(converter.apply_morphological_opening(None, kernel))
+            empty = np.zeros((10, 10), bool)
+            self.assertFalse(converter.apply_morphological_opening(empty, kernel).any())

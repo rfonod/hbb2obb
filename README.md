@@ -41,7 +41,7 @@
 <details>
 <summary><b>🚀 Planned Enhancements</b></summary>
 
-- **Improved morphological operations**: more advanced operations for better mask refinement.
+- **Improved morphological operations**: more advanced operations for better mask refinement, beyond the signed opening/closing kernel.
 - **Support for other segmentation models**: extend compatibility beyond the SAM/FastSAM families.
 
 </details>
@@ -206,7 +206,7 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--sam_models` / `-sm`: SAM model(s) to use (e.g. `sam_b`, `sam_l`, `sam2_b`, `sam2.1_b`, `sam3`, `mobile_sam`, `FastSAM-s`).
 - `--imgsz`: SAM inference resolution (default: 1280).
 - `--scale_factors` / `-sf`: factor(s) to scale HBBs (single value, or two values for short/long sides).
-- `--opening_kernel_percentage` / `-okp`: morphological opening kernel size as a percentage of the mask's smaller dimension.
+- `--opening_kernel_percentage` / `-okp`: morphological kernel size as a fraction of the mask's smaller dimension. **Positive opens** (erodes then dilates, removing thin protrusions), **negative closes** (dilates then erodes, filling holes and rejoining a fragmented mask), `0` disables it. Closing matters because only the largest contour is kept, so a vehicle split by glare or an occluding pole loses the smaller piece otherwise.
 - `--save_confidence`: append a per-OBB [confidence score](#confidence-scores) as a 10th column in the output TXT files.
 - `--confidence_dir` / `-cd`: write those scores to their own directory instead, one score per line, row-aligned with the labels. Use it when the label files have to stay strictly standard, since Ultralytics and other YOLO OBB readers reject a 10th column. Give it bare for `img_source/../labels_confidence`.
 - `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
@@ -435,8 +435,10 @@ hbb2obb-optimize /path/to/images /path/to/ground_truth -sm sam_b sam_l sam2_b sa
 The grid is the full product of `--imgsz` x `--scale_factors` x `--opening_kernels`, and each grid point is a complete SAM pass over the whole image set, so the cost multiplies quickly: the defaults (3 image sizes, 12 scale factors, 1 opening kernel) already amount to 36 passes, and sweeping three kernels instead of one triples that to 108. `--opening_kernels` / `-ok` defaults to the single value `0.15`, so omitting it leaves the two-axis sweep and its grid size unchanged.
 
 ```bash
-# Add the opening kernel as a third axis (2 x 3 x 3 = 18 grid points)
-hbb2obb-optimize /path/to/images /path/to/ground_truth -iz 960 1280 -sf 0.03 0.05 0.07 -ok 0.0 0.15 0.3
+# Add the morphological kernel as a third axis (2 x 3 x 5 = 30 grid points).
+# Negative values close instead of open, so one axis covers both directions with 0 in the middle.
+hbb2obb-optimize /path/to/images /path/to/ground_truth -iz 960 1280 -sf 0.03 0.05 0.07 \
+    -ok -0.3 -0.15 0.0 0.15 0.3
 ```
 
 A run writes `run_config.yaml`, `results.yaml`, `summary.txt` and `plot.png` into `<output_folder>/<name>`, and `summary.md`, `comparison.png` and `PROVENANCE.txt` into the output folder itself. The plot gives each series a hue by image size and, when more than one opening kernel was swept, a lightness of that hue and a marker shape by kernel, so no two of the swept combinations share a colour. Marker area is the execution time.

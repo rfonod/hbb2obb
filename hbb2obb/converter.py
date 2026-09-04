@@ -111,8 +111,9 @@ def hbb2obb(
         scale_factors: Factor(s) to scale HBB bounding boxes.
                      If single value: same factor for both dimensions.
                      If two values: first for shorter side, second for longer side
-        opening_kernel_percentage: Percentage of mask's smaller dimension for the morphological
-                     opening kernel (0 to disable)
+        opening_kernel_percentage: Fraction of the mask's smaller dimension used as the
+                     morphological kernel. Positive opens (removes thin protrusions), negative
+                     closes (fills holes, rejoins fragments), 0 disables it
         save_img: Save visualization images
         viz_dir: Directory to save visualization images
         show_hbb: Show horizontal bounding boxes
@@ -345,7 +346,8 @@ def create_obb_annotations_multi_model(
     Args:
         hbb_boxes: HBB annotations as numpy array
         masks_all_models: List of masks from different SAM models
-        opening_kernel_percentage: Percentage of mask size for morphological opening kernel (0 to disable)
+        opening_kernel_percentage: Fraction of mask size for the morphological kernel; positive opens,
+                     negative closes, 0 disables it
 
     Returns:
         Tuple containing:
@@ -411,7 +413,9 @@ def create_obb_annotations_multi_model(
         aggregated_hbb_mask_cropped[: y_min_c + 1, :] = False
         aggregated_hbb_mask_cropped[y_max_c:, :] = False
 
-        # Apply morphological opening to remove small objects / thin protrusions
+        # Opening trims thin protrusions, closing rejoins a fragmented vehicle; the sign picks one.
+        # This runs before the largest contour is taken, which is the only point at which a mask
+        # broken into pieces can still be repaired.
         aggregated_hbb_mask_final = apply_morphological_opening(aggregated_hbb_mask_cropped, opening_kernel_percentage)
 
         # Store the final mask
@@ -845,18 +849,33 @@ def simplify_contour(contour: np.ndarray, epsilon: float) -> np.ndarray:
 
 def apply_morphological_opening(mask: np.ndarray, kernel_percentage: float) -> np.ndarray:
     """
-    Applies morphological opening to a boolean mask to remove small objects / thin protrusions.
+    Applies a morphological opening or closing to a boolean mask.
+
+    The sign of ``kernel_percentage`` selects the operation and its magnitude sets the kernel
+    size, so one axis covers both directions and zero is the "off" point in the middle.
+
+    **Positive is an opening** (erode, then dilate), which removes thin protrusions and small
+    specks. It can only take pixels away, so it tightens a mask that has bled into the road or
+    into a neighbouring vehicle.
+
+    **Negative is a closing** (dilate, then erode), which fills holes and joins fragments. It can
+    only add pixels. That matters here because the caller keeps the *largest contour only*: a
+    vehicle split in two by windscreen glare, a roof-colour break or an occluding pole loses the
+    smaller piece for good, and a closing is the only step in the pipeline that can put the two
+    back together before that choice is made. Its risk is the mirror image of opening's: it can
+    also reach across a narrow gap to a neighbour, bounded by the clip to the expanded HBB.
 
     Args:
         mask: The input boolean mask (True for foreground) or None.
-        kernel_percentage: The percentage of the mask's smaller dimension to use as kernel size.
-                        If kernel_percentage <= 0 or mask is None, the original mask is returned unchanged.
+        kernel_percentage: Fraction of the mask's smaller dimension to use as kernel size.
+                        Positive opens, negative closes, and 0 returns the mask unchanged, as
+                        does a None or empty mask.
 
     Returns:
         The processed boolean mask, or None if the input was None.
     """
-    # Return immediately if opening is disabled or the mask is invalid/None
-    if kernel_percentage <= 0 or mask is None or mask.size == 0 or not mask.any():
+    # Return immediately if morphology is disabled or the mask is invalid/None
+    if kernel_percentage == 0 or mask is None or mask.size == 0 or not mask.any():
         return mask
 
     # Ensure mask is boolean before converting to uint8
@@ -874,8 +893,8 @@ def apply_morphological_opening(mask: np.ndarray, kernel_percentage: float) -> n
     # Calculate the smaller dimension of the bounding box
     smaller_dim = min(w, h)
 
-    # Calculate the kernel size based on the smaller dimension
-    kernel_size = max(1, int(smaller_dim * kernel_percentage))
+    # Calculate the kernel size from the magnitude; the sign chose the operation, not the size
+    kernel_size = max(1, int(smaller_dim * abs(kernel_percentage)))
 
     # Ensure kernel size is odd
     kernel_size = kernel_size + 1 if kernel_size % 2 == 0 else kernel_size
@@ -889,8 +908,9 @@ def apply_morphological_opening(mask: np.ndarray, kernel_percentage: float) -> n
     # Convert boolean mask to uint8 (0 and 255) for OpenCV function
     mask_uint8 = mask.astype(np.uint8) * 255
 
-    # Apply morphological opening
-    opened_mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel)
+    # Apply the operation the sign selected
+    operation = cv2.MORPH_OPEN if kernel_percentage > 0 else cv2.MORPH_CLOSE
+    opened_mask_uint8 = cv2.morphologyEx(mask_uint8, operation, kernel)
 
     # Convert back to boolean mask
     processed_mask = opened_mask_uint8 > 0

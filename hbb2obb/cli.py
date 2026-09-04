@@ -149,7 +149,9 @@ def main_hbb2obb():
         "-okp",
         type=float,
         default=0.15,
-        help="Percentage of mask's smaller dimension for morphological opening. Ignored if <= 0.",
+        help="Fraction of the mask's smaller dimension used as the morphological kernel. Positive opens "
+        "(removes thin protrusions), negative closes (fills holes and rejoins a fragmented mask before the "
+        "largest contour is taken), 0 disables it.",
     )
 
     # Visualization control arguments
@@ -1229,9 +1231,10 @@ def main_hbb2obb_optimize():
         type=float,
         nargs='+',
         default=None,
-        help="Opening kernel percentages to test (default: 0.15, a single value). Third grid axis: a run "
-        "performs len(imgsz) x len(scale_factors) x len(opening_kernels) full SAM passes over the image "
-        "set, so the defaults give 3 x 12 x 1 = 36, and three kernels instead of one triples that to 108",
+        help="Morphological kernel fractions to test (default: 0.15, a single value); negative values close "
+        "instead of open. Third grid axis: a run performs len(imgsz) x len(scale_factors) x "
+        "len(opening_kernels) full SAM passes over the image set, so the defaults give 3 x 12 x 1 = 36, and "
+        "three kernels instead of one triples that to 108",
     )
 
     # Evaluation options
