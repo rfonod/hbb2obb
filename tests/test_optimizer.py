@@ -541,8 +541,81 @@ def test_refreshing_on_a_metric_a_run_never_recorded_says_so(monkeypatch, tmp_pa
     run_cli(monkeypatch, "-c", str(config), "--refresh", "--plot_metric", "median_angle_error")
 
     assert "Skipping sam_b" in capsys.readouterr().out
-    summary = (bench / optimizer.BENCHMARK_SUMMARY_NAME).read_text(encoding="utf-8")
+    # A metric other than the ranking one writes its own summary, leaving summary.md alone
+    assert not (bench / optimizer.BENCHMARK_SUMMARY_NAME).exists()
+    summary = (bench / "summary_median_angle_error.md").read_text(encoding="utf-8")
     assert "No accuracy-against-compute figure" in summary
     # The table is still written, with the columns it cannot fill left empty rather than faked
     assert "| Models | Image size" in summary
     assert "| - | - |" in summary
+
+
+def test_a_metric_never_overwrites_the_figures_already_there(monkeypatch, tmp_path, no_sweep):
+    """
+    Drawing a second metric must add to the folder, never replace what is in it.
+
+    The whole reason to draw one is to compare it against the ranking metric, which is impossible
+    if rendering it destroys the thing being compared against.
+    """
+    config = write_config(tmp_path)
+    run_cli(monkeypatch, "-c", str(config))
+    bench = tmp_path / "bench"
+    default = (bench / "sam_b" / optimizer.PLOT_NAME).read_bytes()
+
+    run_cli(monkeypatch, "-c", str(config), "--refresh", "--plot_metric", "median_angle_error")
+
+    assert (bench / "sam_b" / optimizer.PLOT_NAME).read_bytes() == default
+    assert (bench / "sam_b" / "plot_median_angle_error.png").is_file()
+    assert (bench / optimizer.BENCHMARK_PLOT_NAME).is_file()
+    assert (bench / "comparison_median_angle_error.png").is_file()
+    assert (bench / optimizer.BENCHMARK_SUMMARY_NAME).is_file()
+    assert (bench / "summary_median_angle_error.md").is_file()
+
+
+def test_a_sweep_draws_the_other_metrics_without_being_asked(monkeypatch, tmp_path, no_sweep):
+    """
+    They cost no SAM time and are already recorded, so nobody should have to remember a second
+    command to get them.
+    """
+    config = write_config(tmp_path)
+    run_cli(monkeypatch, "-c", str(config))
+
+    bench = tmp_path / "bench"
+    for metric in optimizer.AUTO_PLOT_METRICS:
+        assert (bench / "sam_b" / f"plot_{metric}.png").is_file(), metric
+        assert (bench / f"comparison_{metric}.png").is_file(), metric
+        assert (bench / f"summary_{metric}.md").is_file(), metric
+
+
+def test_asking_for_one_metric_does_not_also_draw_the_rest(monkeypatch, tmp_path, no_sweep):
+    """An explicit --plot_metric is a request for that one, not a request for everything."""
+    config = write_config(tmp_path)
+    run_cli(monkeypatch, "-c", str(config), "--plot_metric", "median_angle_error")
+
+    bench = tmp_path / "bench"
+    assert (bench / "sam_b" / "plot_median_angle_error.png").is_file()
+    assert not (bench / "sam_b" / "plot_iou_at_90.png").exists()
+
+
+def test_refresh_needs_no_images_labels_or_checkpoints(monkeypatch, tmp_path, capsys, no_sweep):
+    """
+    A finished results folder is usually read somewhere else: copied off the machine that measured
+    it, without the imagery. Re-rendering reads results.yaml and nothing else, so it must work
+    there rather than exiting over inputs it never opens.
+    """
+    bench = tmp_path / "bench"
+    (bench / "sam_b").mkdir(parents=True)
+    points = [grid_point(sf=sf) for sf in (0.04, 0.05)]
+    with open(bench / "sam_b" / optimizer.RESULTS_NAME, "w", encoding="utf-8") as f:
+        yaml.dump({"all_results": points, "best_parameters": points[-1]}, f)
+    with open(bench / "sam_b" / optimizer.RUN_CONFIG_NAME, "w", encoding="utf-8") as f:
+        yaml.dump({"run_name": "sam_b", "sam_models": ["sam_b"]}, f)
+
+    # Nothing but the results folder exists: no images, no labels, no checkpoints
+    config = write_config(tmp_path, img_source=str(tmp_path / "gone"), gt_dir=str(tmp_path / "gone_too"))
+    capsys.readouterr()
+
+    run_cli(monkeypatch, "-c", str(config), "--refresh")
+
+    assert "Wrote" in capsys.readouterr().out
+    assert (bench / optimizer.BENCHMARK_SUMMARY_NAME).is_file()
