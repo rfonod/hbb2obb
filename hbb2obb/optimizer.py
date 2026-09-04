@@ -44,6 +44,7 @@ PLOT_NAME = "plot.png"
 BENCHMARK_SUMMARY_NAME = "summary.md"
 BENCHMARK_PLOT_NAME = "comparison.png"
 BENCHMARK_PROVENANCE_NAME = "PROVENANCE.txt"
+AUTO_PLOT_METRICS = ("median_angle_error", "iou_at_90")
 
 # What a benchmark YAML may say, at each level. Anything else is a typo, and a typo in a file
 # that drives a six-hour unattended run should fail immediately rather than silently do the
@@ -477,9 +478,12 @@ def write_summary(
     The per-run folders answer "which scale factor won for this ensemble"; only this answers
     "which ensemble, and was it worth its time".
     """
+    from hbb2obb import plotting
     from hbb2obb.__version__ import __version__
 
-    out = output_folder / BENCHMARK_SUMMARY_NAME
+    # A summary for a metric other than the ranking one is a second document beside the first,
+    # never a replacement for it, so it is named after its metric exactly as its figure is.
+    out = output_folder / plotting.plot_filename(Path(BENCHMARK_SUMMARY_NAME).stem, metric, "md")
     if not rows:
         out.write_text("# HBB2OBB Benchmark Summary\n\nNo finished runs to summarise.\n", encoding="utf-8")
         return out
@@ -548,19 +552,22 @@ def write_summary(
     ]
 
     if plot:
-        from hbb2obb import plotting
-
+        comparison_name = plotting.plot_filename(Path(BENCHMARK_PLOT_NAME).stem, metric)
+        # The ranking metric keeps the caption it has always had; another metric names itself.
+        caption = (
+            "Best IoU" if metric in (None, plotting.DEFAULT_METRIC) else plotting.resolve_metric(metric).axis_label
+        )
         # No run recording the requested metric is a fact about the folder, not an error: the
         # summary still has a table to write, so it says why the figure is missing and goes on.
         try:
-            plotting.comparison_plot(rows, output_folder / BENCHMARK_PLOT_NAME, metric=metric)
+            plotting.comparison_plot(rows, output_folder / comparison_name, metric=metric)
         except ValueError as e:
             lines += [f"No accuracy-against-compute figure: {e}.", ""]
         else:
             lines += [
                 "## Accuracy against compute",
                 "",
-                f"![Best IoU against execution time]({BENCHMARK_PLOT_NAME})",
+                f"![{caption} against execution time]({comparison_name})",
                 "",
                 "Each point is one run at its best grid point. The dashed line is the Pareto front:",
                 "the runs that no other run beats on both accuracy and time.",

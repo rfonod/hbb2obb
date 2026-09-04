@@ -125,6 +125,19 @@ METRICS = {
 DEFAULT_METRIC = "avg_iou"
 
 
+def plot_filename(stem: str, metric: Optional[str], extension: str = "png") -> str:
+    """
+    Where the artifact for ``metric`` belongs, given the default artifact's ``stem``.
+
+    The ranking metric keeps the plain name a sweep has always written. Every other metric gets a
+    name of its own, so asking for one never overwrites what is already in the folder: the whole
+    point of drawing a second metric is to compare it against the first, which is impossible if
+    rendering it destroys the first.
+    """
+    suffix = "" if metric in (None, DEFAULT_METRIC) else f"_{metric}"
+    return f"{stem}{suffix}.{extension}"
+
+
 def resolve_metric(metric: Optional[str]) -> Metric:
     """Look up a metric by name, naming the alternatives when the name is not one of them."""
     name = metric or DEFAULT_METRIC
@@ -516,7 +529,7 @@ def run_plot(
     if not series:
         raise ValueError(f"{benchmark_dir}/results.yaml holds no grid point recording {metric!r}")
 
-    output = output or benchmark_dir / "plot.png"
+    output = output or benchmark_dir / plot_filename("plot", metric)
     create_plot(
         series,
         best_params,

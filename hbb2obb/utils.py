@@ -136,16 +136,22 @@ def get_image_paths(input_path: Path) -> list:
     return image_paths
 
 
-def get_hbb_dir(img_path: Path, hbb_dir: Path = None) -> Path:
+def get_hbb_dir(img_path: Path, hbb_dir: Path = None, must_exist: bool = True) -> Path:
     """
     Get the directory containing HBB annotations.
     If not provided, it defaults to the parent directory of the image path.
+
+    ``must_exist=False`` resolves the path without requiring it to be there, for a caller that
+    only names the directory rather than reading it: re-rendering a finished sweep works on a
+    results folder copied away from the images it was measured on.
     """
     if hbb_dir is None:
         if img_path.is_dir():
             hbb_dir = img_path.parent / "labels_hbb"
         else:
             hbb_dir = img_path.parent.parent / "labels_hbb"
+    if not must_exist:
+        return hbb_dir
     if not hbb_dir.is_dir():
         print(
             f"\nError: no HBB directory at {hbb_dir.resolve()}\n"
