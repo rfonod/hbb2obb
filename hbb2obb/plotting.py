@@ -218,6 +218,26 @@ def organize_data_by_series(results: Sequence[dict], metric: Optional[Metric] = 
     return data_by_series
 
 
+def exact(value: float, min_decimals: int = 3, max_decimals: int = 8) -> str:
+    """
+    Render a number at the fewest decimals that still reproduce it, padded to ``min_decimals``.
+
+    A fixed format has to be wide enough for the finest grid anyone sweeps, and a grid gets finer
+    every time a stage refines the one before it. At three decimals a scale factor of 0.0125 is
+    drawn as 0.013, which is not a point that was measured and not a value the config contains;
+    the reader has no way to tell the label from a real 0.013 that a coarser sweep would produce.
+    Widening the format instead would put a trailing zero on every ordinary value, so the width
+    follows the number: 0.05 keeps the 0.050 it has always been drawn as, and 0.0125 gets the
+    fourth decimal it needs. That leaves every figure measured on a two- or three-decimal grid,
+    which is every one shipped so far, byte for byte what it was.
+    """
+    for decimals in range(min_decimals, max_decimals + 1):
+        text = f"{value:.{decimals}f}"
+        if float(text) == float(value):
+            return text
+    return f"{value:.{max_decimals}f}"
+
+
 def series_label(imgsz: int, kernel: Optional[float], multiple_kernels: bool) -> str:
     """Label a series, naming the opening kernel only when the run swept more than one."""
     return f"{imgsz}px, k={kernel:g}" if multiple_kernels else f"{imgsz}px"
@@ -411,7 +431,7 @@ def create_plot(
 
     best_label = series_label(best_params['imgsz'], best_params.get('opening_kernel_percentage'), multiple_kernels)
     plt.annotate(
-        f"Best: {best_label}, SF={best_params['scale_factor']:.3f}\n" + metric.annotation(best_params),
+        f"Best: {best_label}, SF={exact(best_params['scale_factor'])}\n" + metric.annotation(best_params),
         xy=(best_params['scale_factor'], best_value),
         xytext=xytext,
         textcoords='offset points',

@@ -362,6 +362,8 @@ def write_run(
     folder: Path, spec: RunSpec, outcome: dict, config: dict, plot: bool = True, metric: Optional[str] = None
 ) -> None:
     """Write run_config.yaml, results.yaml, summary.txt and plot.png for one run."""
+    from hbb2obb.plotting import exact
+
     folder.mkdir(parents=True, exist_ok=True)
 
     with open(folder / RUN_CONFIG_NAME, "w", encoding="utf-8") as f:
@@ -386,8 +388,8 @@ def write_run(
         f.write(f"End Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("BEST PARAMETERS:\n")
         f.write(f"  Image Size: {best['imgsz']}\n")
-        f.write(f"  Scale Factor: {best['scale_factor']:.4f}\n")
-        f.write(f"  Opening Kernel: {best['opening_kernel_percentage']:.4f}\n")
+        f.write(f"  Scale Factor: {exact(best['scale_factor'], 4)}\n")
+        f.write(f"  Opening Kernel: {exact(best['opening_kernel_percentage'], 4)}\n")
         f.write(f"  Average IoU: {best['avg_iou']:.4f} ± {best['std_iou']:.4f}\n")
         f.write(f"  Median IoU: {best['median_iou']:.4f}\n")
         f.write(
@@ -407,8 +409,8 @@ def write_run(
         f.write("\nALL RESULTS (sorted by Average IoU):\n")
         for i, result in enumerate(sorted(outcome["all_results"], key=lambda x: x["avg_iou"], reverse=True)):
             f.write(
-                f"{i + 1:4d}. ImgSz: {result['imgsz']:5d}, SF: {result['scale_factor']:7.4f}, "
-                f"K: {result['opening_kernel_percentage']:7.4f}, IoU: {result['avg_iou']:7.4f} ± "
+                f"{i + 1:4d}. ImgSz: {result['imgsz']:5d}, SF: {exact(result['scale_factor'], 4):>7}, "
+                f"K: {exact(result['opening_kernel_percentage'], 4):>7}, IoU: {result['avg_iou']:7.4f} ± "
                 f"{result['std_iou']:7.4f}, Angle: {result['median_angle_error']:6.2f} deg, "
                 f"IoU>=0.90: {result['iou_fractions']['0.90']:6.1%}, "
                 f"Time: {result['execution_time']:5.2f}s\n"
@@ -592,11 +594,13 @@ def write_summary(
 
 def print_best(best: Dict[str, Any], run_folder: Path) -> None:
     """The block a finished run prints, unchanged from the script this replaced."""
+    from hbb2obb.plotting import exact
+
     print("\n" + "=" * 116)
     print("BEST PARAMETERS:")
     print(f"  Image Size: {best['imgsz']}")
-    print(f"  Scale Factor: {best['scale_factor']:.4f}")
-    print(f"  Opening Kernel: {best['opening_kernel_percentage']:.4f}")
+    print(f"  Scale Factor: {exact(best['scale_factor'], 4)}")
+    print(f"  Opening Kernel: {exact(best['opening_kernel_percentage'], 4)}")
     print(f"  Average IoU: {best['avg_iou']:.4f} ± {best['std_iou']:.4f}")
     print(f"  Total Matches: {best['total_matches']}")
     print(f"  Total GT: {best['total_gt']}")

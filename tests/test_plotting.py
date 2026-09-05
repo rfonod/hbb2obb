@@ -197,6 +197,36 @@ def test_every_reported_metric_renders_a_run(tmp_path, metric):
     assert plotting.run_plot(run_dir, output=tmp_path / f"{metric}.png", metric=metric).stat().st_size > 0
 
 
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (0.0, "0.000"),
+        (-0.01, "-0.010"),
+        (0.05, "0.050"),
+        (0.1, "0.100"),
+        (0.15, "0.150"),
+        (0.0125, "0.0125"),
+        (0.0375, "0.0375"),
+        (0.00625, "0.00625"),
+    ],
+)
+def test_a_swept_value_is_never_drawn_as_one_that_was_not_swept(value, expected):
+    """
+    Three decimals turn the 0.0125 of a refined grid into 0.013, a point nobody measured.
+
+    Worse, 0.0375 comes out as 0.037, so the label is not even the nearest three-decimal value.
+    Everything a two- or three-decimal grid contains has to keep the width it has always had,
+    since that is every figure shipped so far.
+    """
+    assert plotting.exact(value) == expected
+
+
+def test_the_wider_summary_format_is_also_left_alone(tmp_path):
+    """The run summary asks for four decimals; the shipped grids must still get exactly four."""
+    for value in (-0.01, 0.0, 0.05, 0.1, 0.15):
+        assert plotting.exact(value, 4) == f"{value:.4f}"
+
+
 def test_a_lower_is_better_metric_marks_its_own_winner(tmp_path):
     """
     The star must sit on the grid point the drawn metric likes, not on the objective's winner.
