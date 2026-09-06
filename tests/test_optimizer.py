@@ -619,3 +619,71 @@ def test_refresh_needs_no_images_labels_or_checkpoints(monkeypatch, tmp_path, ca
 
     assert "Wrote" in capsys.readouterr().out
     assert (bench / optimizer.BENCHMARK_SUMMARY_NAME).is_file()
+
+
+def test_a_sweep_draws_the_angle_statistic_that_can_discriminate(monkeypatch, tmp_path, no_sweep):
+    """
+    The median orientation error is zero at every setting on a set whose ground truth is largely
+    axis-aligned, which is what a drone squared to a road grid produces. Drawing it by default
+    hands the reader a flat line at zero and calls it a metric. p90 sits above that mass.
+    """
+    assert "p90_angle_error" in optimizer.AUTO_PLOT_METRICS
+    assert "median_angle_error" not in optimizer.AUTO_PLOT_METRICS
+
+    config = write_config(tmp_path)
+    run_cli(monkeypatch, "-c", str(config))
+    bench = tmp_path / "bench"
+    assert (bench / "comparison_p90_angle_error.png").is_file()
+    assert not (bench / "comparison_median_angle_error.png").exists()
+
+    # Still selectable, and still recorded, for whoever wants it.
+    from hbb2obb import plotting
+
+    assert "median_angle_error" in plotting.METRICS
+    run_cli(monkeypatch, "-c", str(config), "--refresh", "--plot_metric", "median_angle_error")
+    assert (bench / "comparison_median_angle_error.png").is_file()
+
+
+def test_two_runs_that_differ_are_never_printed_as_if_they_did_not(monkeypatch, tmp_path, no_sweep):
+    """
+    Four decimals showed 0.885935 and 0.885857 as the same 0.8859, in a table whose whole purpose
+    is to order them. The ordering is on the full value, so the printing has to keep up with it.
+    """
+    close = [grid_point(sf=0.04, iou=0.885935), grid_point(sf=0.05, iou=0.885857)]
+    monkeypatch.setattr(optimizer, "sweep", lambda *a, **k: fake_outcome(close))
+    run_cli(monkeypatch, "-c", str(write_config(tmp_path)))
+
+    summary = (tmp_path / "bench" / optimizer.BENCHMARK_SUMMARY_NAME).read_text(encoding="utf-8")
+    assert "0.88594" in summary
+    assert "0.88586" not in summary  # only each run's own best point reaches this table
+    assert "| Angle p90 |" in summary
+
+    run_summary = (tmp_path / "bench" / "sam_b" / optimizer.SUMMARY_NAME).read_text(encoding="utf-8")
+    assert "0.88594" in run_summary and "0.88586" in run_summary
+    assert "Angle p90:" in run_summary
+
+
+def test_the_resolution_of_the_objective_reaches_the_summary(monkeypatch, tmp_path, no_sweep):
+    """
+    Without `sem_iou` a reader has the box-to-box spread and nothing that says how finely two runs
+    can be told apart, which is the only question the ranking actually poses.
+    """
+    point = grid_point(iou=0.885935)
+    point["sem_iou"] = 0.00146
+    monkeypatch.setattr(optimizer, "sweep", lambda *a, **k: fake_outcome([point]))
+    run_cli(monkeypatch, "-c", str(write_config(tmp_path)))
+
+    run_summary = (tmp_path / "bench" / "sam_b" / optimizer.SUMMARY_NAME).read_text(encoding="utf-8")
+    assert "SEM 0.00146" in run_summary
+    results = yaml.safe_load((tmp_path / "bench" / "sam_b" / optimizer.RESULTS_NAME).read_text())
+    assert results["best_parameters"]["sem_iou"] == pytest.approx(0.00146)
+
+
+def test_a_run_measured_before_1_9_0_still_writes_its_summary(monkeypatch, tmp_path, no_sweep):
+    """A results folder with no sem_iou is a fact about its age, not a reason to crash."""
+    monkeypatch.setattr(optimizer, "sweep", lambda *a, **k: fake_outcome([grid_point()]))
+    run_cli(monkeypatch, "-c", str(write_config(tmp_path)))
+
+    run_summary = (tmp_path / "bench" / "sam_b" / optimizer.SUMMARY_NAME).read_text(encoding="utf-8")
+    assert "Average IoU:" in run_summary
+    assert "SEM" not in run_summary

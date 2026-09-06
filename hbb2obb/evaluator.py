@@ -19,6 +19,11 @@ from hbb2obb.utils import load_label_map
 # detection literature reports the same information.
 IOU_REPORT_THRESHOLDS = (0.5, 0.75, 0.85, 0.9)
 
+# The rung of the ladder that reports alone, in the per-class table and in every benchmark
+# artifact. Mean IoU saturates on tight boxes and cannot separate settings this one separates
+# clearly, so it is the score to read when two configurations tie on the objective.
+HIGH_IOU_THRESHOLD = 0.9
+
 
 def obb_orientation(points) -> float:
     """
@@ -222,10 +227,20 @@ def evaluate_obb(
     # Calculate IoU statistics
     avg_iou, std_iou = (0, 0) if not all_ious else (np.mean(all_ious), np.std(all_ious))
     median_iou = 0 if not all_ious else np.median(all_ious)
+    # The standard error of the mean, which answers a different question from the std beside it.
+    # std_iou is the box-to-box spread and stays wide however many boxes are scored; sem_iou is the
+    # resolution of the mean itself, and it is what decides whether two configurations that differ
+    # in the fourth decimal differ at all. On a set of a few thousand tight boxes the two are two
+    # orders of magnitude apart, so reading the std as an error bar on the mean overstates the
+    # uncertainty by that factor and hides the fact that a ranking is ranking noise.
+    sem_iou = 0 if not all_ious else float(np.std(all_ious) / np.sqrt(len(all_ious)))
 
-    # Orientation statistics. The median leads because the distribution has a tail: a handful of
-    # boxes where the mask found the wrong axis land near 90 degrees and would drag a mean far
-    # from where the bulk of the boxes actually sit.
+    # Orientation statistics. All four are recorded because no one of them is right everywhere.
+    # The median is the most robust to the wrong-axis tail, where a handful of near-square boxes
+    # land near 90 degrees, but it is useless on a set whose ground truth is mostly axis-aligned:
+    # a drone squared to an arterial grid produces one, most pairs then score exactly zero, and
+    # every percentile at or below the axis-aligned share collapses to zero at every setting.
+    # p90 sits above that mass, which is why it is what the sweep reports and draws by default.
     if not all_angle_errors:
         avg_angle_error = median_angle_error = std_angle_error = p90_angle_error = 0
     else:
@@ -244,6 +259,7 @@ def evaluate_obb(
         'total_pred': total_pred,
         'avg_iou': avg_iou,
         'std_iou': std_iou,
+        'sem_iou': sem_iou,
         'median_iou': median_iou,
         'iou_fractions': iou_fractions(all_ious),
         'avg_angle_error': avg_angle_error,
@@ -296,18 +312,20 @@ def print_results(results: dict, map_path: Path = None) -> None:
     if results['exclude_edge_cases']:
         print(f"Total Edge Cases Excluded: {results['total_edge_cases']}")
 
-    print(f"Average IoU: {results['avg_iou']:.4f} ± {results['std_iou']:.4f}")
+    sem = results.get('sem_iou')
+    sem_text = f" (SEM {sem:.5f})" if sem else ""
+    print(f"Average IoU: {results['avg_iou']:.5f} ± {results['std_iou']:.5f}{sem_text}")
 
     if results['total_matches']:
-        print(f"Median IoU: {results['median_iou']:.4f}")
+        print(f"Median IoU: {results['median_iou']:.5f}")
         fractions = results.get('iou_fractions') or {}
         if fractions:
             ladder = "  ".join(f"IoU>={threshold}: {share:.1%}" for threshold, share in sorted(fractions.items()))
             print(f"Matched Boxes Above Threshold: {ladder}")
         print(
-            f"Orientation Error: median {results['median_angle_error']:.2f}°, "
-            f"mean {results['avg_angle_error']:.2f}° ± {results['std_angle_error']:.2f}°, "
-            f"p90 {results['p90_angle_error']:.2f}°"
+            f"Orientation Error: p90 {results['p90_angle_error']:.2f}°, "
+            f"median {results['median_angle_error']:.2f}°, "
+            f"mean {results['avg_angle_error']:.2f}° ± {results['std_angle_error']:.2f}°"
         )
 
     if results['excluded_classes']:
@@ -329,13 +347,20 @@ def print_results(results: dict, map_path: Path = None) -> None:
 
             if stats['matches'] == 0:
                 avg_class_iou, std_class_iou = 0, 0
+                median_class_iou = class_iou_at_90 = 0
             else:
                 avg_class_iou = stats['iou_sum'] / stats['matches']
                 std_class_iou = np.std(stats['iou_values']) if len(stats['iou_values']) > 1 else 0
+                median_class_iou = np.median(stats['iou_values'])
+                class_iou_at_90 = iou_fractions(stats['iou_values'])[f"{HIGH_IOU_THRESHOLD:.2f}"]
 
             class_name = label_map.get(class_id, str(class_id)) if label_map else str(class_id)
 
-            median_class_angle = np.median(stats['angle_errors']) if stats['angle_errors'] else 0
+            if stats['angle_errors']:
+                median_class_angle = np.median(stats['angle_errors'])
+                p90_class_angle = np.percentile(stats['angle_errors'], 90)
+            else:
+                median_class_angle = p90_class_angle = 0
 
             row = [
                 class_name,
@@ -343,12 +368,25 @@ def print_results(results: dict, map_path: Path = None) -> None:
                 stats['pred_total'],
                 stats['matches'],
                 f"{avg_class_iou:.4f} ± {std_class_iou:.4f}",
+                f"{median_class_iou:.4f}",
+                f"{class_iou_at_90:.1%}",
+                f"{p90_class_angle:.2f}",
                 f"{median_class_angle:.2f}",
             ]
 
             table_data.append(row)
 
-        headers = ["Class", "GT", "Pred", "Matches", "IoU (mean ± std)", "Angle err (median °)"]
+        headers = [
+            "Class",
+            "GT",
+            "Pred",
+            "Matches",
+            "IoU (mean ± std)",
+            "IoU (median)",
+            f"IoU>={HIGH_IOU_THRESHOLD:g}",
+            "Angle p90 (°)",
+            "Angle p50 (°)",
+        ]
         df = pd.DataFrame(table_data, columns=headers)
         print(df.to_string(index=False))
 

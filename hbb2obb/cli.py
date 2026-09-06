@@ -36,7 +36,7 @@ ENTRY_POINTS_EPILOG = (
     "  hbb2obb-detect    detect HBBs with an Ultralytics model, for images that have none\n"
     "  hbb2obb-convert   convert annotations between YOLO, DOTA, Pascal VOC, COCO and LabelMe\n"
     "  hbb2obb-view      inspect HBB and OBB annotations over their images, interactively\n"
-    "  hbb2obb-eval      score predicted OBBs against ground truth (precision, recall, F1, IoU)\n"
+    "  hbb2obb-eval      score predicted OBBs against ground truth (IoU, orientation error, per class)\n"
     "  hbb2obb-optimize  search hyperparameters, as one sweep or a whole benchmark\n\n"
     "Run any of them with --help for its own options, e.g. hbb2obb-detect --help."
 )

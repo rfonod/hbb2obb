@@ -362,3 +362,60 @@ class TestOrientationMetrics:
         # The ladder can only fall as the bar rises
         shares = [results["iou_fractions"][k] for k in ("0.50", "0.75", "0.85", "0.90")]
         assert shares == sorted(shares, reverse=True)
+
+
+class TestTheResolutionOfAComparison:
+    """
+    `sem_iou` answers a question `std_iou` cannot: whether two runs differ at all.
+
+    The spread of the boxes stays wide however many are scored, so reading it as an error bar on
+    the mean overstates the uncertainty by the square root of the box count and makes a ranking of
+    noise look like a ranking.
+    """
+
+    def test_the_standard_error_shrinks_with_the_box_count(self, gt_dir, pred_dir):
+        results = evaluate_obb(gt_dir=gt_dir, pred_dir=pred_dir, iou_threshold=0.1)
+        expected = results["std_iou"] / np.sqrt(results["total_matches"])
+        assert results["sem_iou"] == pytest.approx(expected)
+        assert results["sem_iou"] < results["std_iou"]
+
+    def test_a_set_that_matched_nothing_still_reports_one(self, gt_dir, tmp_path):
+        """Every column has to be writable, including on a run that matched no box at all."""
+        results = evaluate_obb(gt_dir=gt_dir, pred_dir=tmp_path, iou_threshold=0.1)
+        assert results["sem_iou"] == 0
+
+
+class TestTheAxisAlignedGroundTruthProblem:
+    """
+    A drone squared to a road grid produces ground truth that is mostly axis-aligned, and every
+    percentile at or below that share is then zero at every setting. The median is the 50th, so on
+    such a set it cannot separate anything; p90 sits above the mass and can. This is why the
+    benchmark reports and draws p90 by default.
+    """
+
+    def test_a_mostly_axis_aligned_set_zeroes_the_median_but_not_p90(self, tmp_path):
+        gt, pred = tmp_path / "gt", tmp_path / "pred"
+        gt.mkdir()
+        pred.mkdir()
+
+        def box(cx, cy, angle):
+            radians = np.radians(angle)
+            cos, sin = np.cos(radians), np.sin(radians)
+            corners = [(-20, -8), (20, -8), (20, 8), (-20, 8)]
+            return [(cx + x * cos - y * sin, cy + x * sin + y * cos) for x, y in corners]
+
+        def write(folder, angles):
+            lines = []
+            for i, angle in enumerate(angles):
+                corners = box(200 + 100 * i, 200, angle)
+                lines.append("0 " + " ".join(f"{v:.2f}" for point in corners for v in point))
+            (folder / "frame.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # Seven of ten boxes are axis-aligned and converted exactly; the other three are off by 6°.
+        write(gt, [0.0] * 7 + [30.0, 40.0, 50.0])
+        write(pred, [0.0] * 7 + [36.0, 46.0, 56.0])
+
+        results = evaluate_obb(gt_dir=gt, pred_dir=pred, iou_threshold=0.1)
+        assert results["total_matches"] == 10
+        assert results["median_angle_error"] == pytest.approx(0.0)
+        assert results["p90_angle_error"] > 5.0
