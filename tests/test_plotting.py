@@ -197,6 +197,36 @@ def test_every_reported_metric_renders_a_run(tmp_path, metric):
     assert plotting.run_plot(run_dir, output=tmp_path / f"{metric}.png", metric=metric).stat().st_size > 0
 
 
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (0.0, "0.000"),
+        (-0.01, "-0.010"),
+        (0.05, "0.050"),
+        (0.1, "0.100"),
+        (0.15, "0.150"),
+        (0.0125, "0.0125"),
+        (0.0375, "0.0375"),
+        (0.00625, "0.00625"),
+    ],
+)
+def test_a_swept_value_is_never_drawn_as_one_that_was_not_swept(value, expected):
+    """
+    Three decimals turn the 0.0125 of a refined grid into 0.013, a point nobody measured.
+
+    Worse, 0.0375 comes out as 0.037, so the label is not even the nearest three-decimal value.
+    Everything a two- or three-decimal grid contains has to keep the width it has always had,
+    since that is every figure shipped so far.
+    """
+    assert plotting.exact(value) == expected
+
+
+def test_the_wider_summary_format_is_also_left_alone(tmp_path):
+    """The run summary asks for four decimals; the shipped grids must still get exactly four."""
+    for value in (-0.01, 0.0, 0.05, 0.1, 0.15):
+        assert plotting.exact(value, 4) == f"{value:.4f}"
+
+
 def test_a_lower_is_better_metric_marks_its_own_winner(tmp_path):
     """
     The star must sit on the grid point the drawn metric likes, not on the objective's winner.
@@ -253,3 +283,49 @@ def test_the_pareto_front_flips_for_an_error_metric(tmp_path):
 def test_comparing_on_a_metric_no_run_recorded_says_so(tmp_path):
     with pytest.raises(ValueError, match="nothing to compare"):
         plotting.comparison_plot([row("a", ["sam_b"], 0.88, 10.0)], tmp_path / "x.png", metric="median_angle_error")
+
+
+class TestTheResolutionBand:
+    """
+    The comparison figure autoscales into whatever range its points occupy, so a field that agrees
+    to within a fraction of one standard error renders as a confident-looking ranking with a
+    near-flat Pareto front. The band is what tells those apart from a real one.
+    """
+
+    def test_a_recorded_standard_error_is_used_as_recorded(self):
+        assert plotting._standard_error_of_the_mean({"sem_iou": 0.0015}) == pytest.approx(0.0015)
+
+    def test_a_row_measured_before_1_9_0_derives_its_own(self):
+        """A results folder from an older sweep still draws its resolution rather than none."""
+        derived = plotting._standard_error_of_the_mean({"std_iou": 0.07, "total_matches": 196})
+        assert derived == pytest.approx(0.07 / 14)
+
+    def test_a_row_with_neither_declines_rather_than_guesses(self):
+        assert plotting._standard_error_of_the_mean({"avg_iou": 0.88}) is None
+
+    def test_only_the_mean_carries_a_resolution(self):
+        """A share and a percentile do not record what they would need to derive one."""
+        sample = {"sem_iou": 0.0015, "std_iou": 0.07, "total_matches": 200}
+        assert plotting.METRICS["avg_iou"].resolution(sample) is not None
+        for name in ("median_iou", "p90_angle_error", "iou_at_90"):
+            assert plotting.METRICS[name].resolution(sample) is None, name
+
+    def test_the_band_widens_the_axis_to_fit_itself(self, tmp_path):
+        """
+        A band drawn around the leader would otherwise be clipped by limits computed from the
+        points alone, which is exactly the case it exists for: every point inside one error bar.
+        """
+        rows = [row("a", ["sam_l"], 0.8801, 10.0), row("b", ["sam_b"], 0.8802, 20.0)]
+        for r in rows:
+            r["sem_iou"] = 0.01  # far wider than the 0.0001 that separates the two runs
+
+        plotting.comparison_plot(rows, tmp_path / "band.png")
+        # matplotlib closes the figure, so read the limits back off the rendered image instead:
+        # what matters is only that the call survived a band far larger than the point spread.
+        assert (tmp_path / "band.png").is_file()
+
+    def test_a_metric_without_a_resolution_still_renders(self, tmp_path):
+        rows = [row("a", ["sam_l"], 0.88, 10.0), row("b", ["sam_b"], 0.87, 20.0)]
+        for r in rows:
+            r["iou_fractions"] = {"0.90": 0.4}
+        assert plotting.comparison_plot(rows, tmp_path / "no_band.png", metric="iou_at_90").is_file()

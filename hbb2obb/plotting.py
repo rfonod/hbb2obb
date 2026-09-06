@@ -59,6 +59,12 @@ class Metric(NamedTuple):
     annotation: Callable[[dict], str]
     higher_is_better: bool
     ylim_pad: float
+    # Resolution of a between-run comparison on this metric, where the metric has one. It is not
+    # the error bar: `error` is the spread of the underlying boxes, which stays wide however many
+    # are scored, while this is the uncertainty of the number being compared and shrinks with the
+    # box count. Runs inside one of these of the leader are not ranked by this metric, they are
+    # tied on it, and the comparison figure says so by drawing the band.
+    resolution: Callable[[dict], Optional[float]] = lambda r: None
 
 
 def _fraction_at(threshold: str) -> Callable[[dict], Optional[float]]:
@@ -71,6 +77,22 @@ def _fraction_at(threshold: str) -> Callable[[dict], Optional[float]]:
     return read
 
 
+def _standard_error_of_the_mean(row: dict) -> Optional[float]:
+    """
+    How finely a run's average IoU can be compared with another run's.
+
+    Recorded directly by hbb2obb 1.9.0 and later; derived from the spread and the box count for a
+    results folder measured before that, so an older sweep still draws its own resolution.
+    """
+    recorded = row.get("sem_iou")
+    if recorded:
+        return float(recorded)
+    spread, count = row.get("std_iou"), row.get("total_matches")
+    if not spread or not count:
+        return None
+    return float(spread) / float(count) ** 0.5
+
+
 METRICS = {
     "avg_iou": Metric(
         value=lambda r: r.get("avg_iou"),
@@ -79,6 +101,7 @@ METRICS = {
         annotation=lambda r: f"IoU={r['avg_iou']:.4f}±{r['std_iou']:.4f}",
         higher_is_better=True,
         ylim_pad=0.05,
+        resolution=_standard_error_of_the_mean,
     ),
     "median_iou": Metric(
         value=lambda r: r.get("median_iou"),
@@ -216,6 +239,26 @@ def organize_data_by_series(results: Sequence[dict], metric: Optional[Metric] = 
         data['execution_time'] = np.array(data['execution_time'])[idx]
 
     return data_by_series
+
+
+def exact(value: float, min_decimals: int = 3, max_decimals: int = 8) -> str:
+    """
+    Render a number at the fewest decimals that still reproduce it, padded to ``min_decimals``.
+
+    A fixed format has to be wide enough for the finest grid anyone sweeps, and a grid gets finer
+    every time a stage refines the one before it. At three decimals a scale factor of 0.0125 is
+    drawn as 0.013, which is not a point that was measured and not a value the config contains;
+    the reader has no way to tell the label from a real 0.013 that a coarser sweep would produce.
+    Widening the format instead would put a trailing zero on every ordinary value, so the width
+    follows the number: 0.05 keeps the 0.050 it has always been drawn as, and 0.0125 gets the
+    fourth decimal it needs. That leaves every figure measured on a two- or three-decimal grid,
+    which is every one shipped so far, byte for byte what it was.
+    """
+    for decimals in range(min_decimals, max_decimals + 1):
+        text = f"{value:.{decimals}f}"
+        if float(text) == float(value):
+            return text
+    return f"{value:.{max_decimals}f}"
 
 
 def series_label(imgsz: int, kernel: Optional[float], multiple_kernels: bool) -> str:
@@ -411,7 +454,7 @@ def create_plot(
 
     best_label = series_label(best_params['imgsz'], best_params.get('opening_kernel_percentage'), multiple_kernels)
     plt.annotate(
-        f"Best: {best_label}, SF={best_params['scale_factor']:.3f}\n" + metric.annotation(best_params),
+        f"Best: {best_label}, SF={exact(best_params['scale_factor'])}\n" + metric.annotation(best_params),
         xy=(best_params['scale_factor'], best_value),
         xytext=xytext,
         textcoords='offset points',
@@ -584,7 +627,16 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300, metric: 
     # On a linear axis that packs half the runs into the leftmost tenth of the plot, so the axis
     # goes logarithmic once the spread is wide enough to warrant it.
     log_x = use_log_scale(times)
-    y_span = (max(ious) - min(ious)) or 1.0
+
+    # The resolution of the comparison, drawn as a band around the leader. Without it a figure
+    # whose whole vertical range is a fraction of one standard error looks like a ranking, because
+    # the axis autoscales into the noise and a near-flat Pareto front is indistinguishable from a
+    # real one. With it, every run inside the band reads as what it is: tied with the best.
+    leader = best_row(rows, spec)
+    band = spec.resolution(leader) if leader is not None else None
+    band_edges = [spec.value(leader) - band, spec.value(leader) + band] if band else []
+
+    y_span = (max(ious + band_edges) - min(ious + band_edges)) or 1.0
     # Room for the labels, which are long: a five-model run is named by all five models.
     if log_x:
         plt.xscale('log')
@@ -600,7 +652,17 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300, metric: 
         x_span = (max(times) - min(times)) or 1.0
         x_lo, x_hi = min(times) - 0.10 * x_span, max(times) + 0.14 * x_span
     plt.xlim(x_lo, x_hi)
-    plt.ylim(min(ious) - 0.16 * y_span, max(ious) + 0.10 * y_span)
+    plt.ylim(min(ious + band_edges) - 0.16 * y_span, max(ious + band_edges) + 0.10 * y_span)
+
+    if band:
+        plt.axhspan(
+            band_edges[0],
+            band_edges[1],
+            color='gray',
+            alpha=0.13,
+            zorder=1,
+            label="±1 standard error of the best",
+        )
 
     def unit_x(value: float) -> float:
         """Position along the axis in 0-1, so collisions are judged as the reader sees them."""
@@ -643,7 +705,6 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300, metric: 
         return any(beats(o) and o['execution_time'] < row['execution_time'] for o in rows)
 
     front = sorted((r for r in rows if not dominated(r)), key=lambda r: r['execution_time'])
-    pareto_legend = None
     if len(front) > 1:
         plt.plot(
             [r['execution_time'] for r in front],
@@ -655,6 +716,10 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300, metric: 
             zorder=2,
             label="Pareto front",
         )
+    # One legend for the two annotations that explain the plot rather than the points; it is drawn
+    # only when there is something in it, so a benchmark of a single run still renders.
+    pareto_legend = None
+    if plt.gca().get_legend_handles_labels()[0]:
         pareto_legend = plt.legend(loc='upper left', fontsize=8, framealpha=0.7)
 
     counts = sorted({len(r['sam_models']) for r in rows})

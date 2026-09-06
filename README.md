@@ -457,10 +457,10 @@ Every grid point records more than the score it is ranked by, and `--plot_metric
 | `avg_iou` | mean IoU with ±std error bars (default) |
 | `median_iou` | median IoU |
 | `median_angle_error` | median orientation error, in degrees |
-| `p90_angle_error` | 90th percentile orientation error |
+| `p90_angle_error` | 90th percentile orientation error, in degrees |
 | `iou_at_75`, `iou_at_90` | share of matched boxes above that IoU |
 
-A sweep draws `median_angle_error` and `iou_at_90` **on its own**, beside the metric it ranked by, since they are already recorded at every grid point and cost no SAM time. So `plot.png`, `plot_median_angle_error.png` and `plot_iou_at_90.png` all land in each run folder, with a `comparison_*.png` and `summary_*.md` for each. Use `--plot_metric` only to draw one of the others, or to redraw after the fact:
+A sweep draws `p90_angle_error` and `iou_at_90` **on its own**, beside the metric it ranked by, since they are already recorded at every grid point and cost no SAM time. So `plot.png`, `plot_p90_angle_error.png` and `plot_iou_at_90.png` all land in each run folder, with a `comparison_*.png` and `summary_*.md` for each. Use `--plot_metric` only to draw one of the others, or to redraw after the fact:
 
 ```bash
 # Redraw an existing sweep against a different metric, running no SAM passes at all
@@ -472,6 +472,8 @@ hbb2obb-optimize -c benchmark.yaml --refresh --plot_metric p90_angle_error
 The search itself always ranks by average IoU, so a sweep stays comparable with one measured before these existed. Only the figures change. A metric knows whether higher or lower is better, so the Pareto front flips for an error metric, and a run plot stars the grid point *that* metric prefers, which is worth looking at precisely when it is not the one that won.
 
 This matters when the scores are tight. Average IoU saturates on well-fitted boxes, so a benchmark can put every configuration inside a few thousandths of the next and still be hiding a real difference in the headings they recover.
+
+Two things to read alongside the ranking. `sem_iou`, recorded at every grid point, is the standard error of the mean; the `±` beside a mean IoU is the box-to-box spread and is a different quantity. The comparison figure shades ±1 `sem_iou` around the leading run, and runs inside that band are tied. And where the ground truth is largely axis-aligned, as in an aerial survey flown square to a road grid, `median_angle_error` reads 0.00 everywhere while `p90_angle_error` still separates the settings.
 
 </details>
 
