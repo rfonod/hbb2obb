@@ -301,6 +301,51 @@ def legend_handle(marker: str, color, label: str) -> Line2D:
     )
 
 
+def place_callout(ax, callout, obstacles: Sequence, candidates: Sequence) -> None:
+    """
+    Put the "Best:" callout in the first corner it actually fits.
+
+    ``candidates`` arrive ordered by how crowded the data leaves each corner, and the first one
+    that lands inside the axes and clear of the legends wins, so a plot whose preferred corner was
+    already free renders exactly as it did before.
+    """
+    figure = ax.figure
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    frame = ax.get_window_extent()
+    # The rounded box around the callout pads it by half a font size on every side, which is what
+    # actually reaches a legend when the text alone does not.
+    pad = 0.5 * callout.get_fontsize() * figure.dpi / 72.0
+
+    blockers = []
+    for artist in obstacles:
+        try:
+            blockers.append(artist.get_window_extent(renderer))
+        except (AttributeError, RuntimeError, ValueError):
+            continue
+
+    def overlap(a, b) -> float:
+        width = min(a.x1, b.x1) - max(a.x0, b.x0)
+        height = min(a.y1, b.y1) - max(a.y0, b.y0)
+        return width * height if width > 0 and height > 0 else 0.0
+
+    def cost(placement) -> float:
+        ha, va, offset = placement
+        callout.set_ha(ha)
+        callout.set_va(va)
+        callout.xyann = offset
+        box = callout.get_window_extent(renderer).padded(pad)
+        # Spilling past the axes is worse than grazing a legend: bbox_inches='tight' does not clip
+        # it, it grows the saved figure and prints the callout over the title or off the side.
+        outside = box.width * box.height - overlap(box, frame)
+        return 2.0 * outside + sum(overlap(box, blocker) for blocker in blockers)
+
+    ha, va, offset = min(candidates, key=cost)  # min keeps the first of equal costs
+    callout.set_ha(ha)
+    callout.set_va(va)
+    callout.xyann = offset
+
+
 def create_plot(
     data_by_series: dict,
     best_params: dict,
@@ -325,6 +370,9 @@ def create_plot(
     markers = MARKERS
 
     legend_elements = []
+    # Everything the "Best:" callout must not land on. Collected as the plot is built and resolved
+    # once the layout is final, since a legend has no position until then.
+    obstacles = []
 
     # Determine marker size range based on execution time
     if not no_time:
@@ -435,25 +483,19 @@ def create_plot(
             else:
                 quadrant_points['bottom_left'].append((sf, iou))
 
-    # Find the quadrant with the fewest points
-    min_quadrant = min(quadrant_points, key=lambda q: len(quadrant_points[q]))
-
-    # Set annotation position based on the least crowded quadrant
-    if min_quadrant == 'top_right':
-        ha, va = 'left', 'bottom'
-        xytext = (20, 20)
-    elif min_quadrant == 'top_left':
-        ha, va = 'right', 'bottom'
-        xytext = (-20, 20)
-    elif min_quadrant == 'bottom_right':
-        ha, va = 'left', 'top'
-        xytext = (20, -20)
-    else:  # bottom_left
-        ha, va = 'right', 'top'
-        xytext = (-20, -20)
+    # Least crowded quadrant first, then the rest, so a callout that collides with a legend or
+    # with the edge of the axes has somewhere to go without landing on the data.
+    placements = {
+        'top_right': ('left', 'bottom', (20, 20)),
+        'top_left': ('right', 'bottom', (-20, 20)),
+        'bottom_right': ('left', 'top', (20, -20)),
+        'bottom_left': ('right', 'top', (-20, -20)),
+    }
+    candidates = [placements[q] for q in sorted(quadrant_points, key=lambda q: len(quadrant_points[q]))]
+    ha, va, xytext = candidates[0]
 
     best_label = series_label(best_params['imgsz'], best_params.get('opening_kernel_percentage'), multiple_kernels)
-    plt.annotate(
+    callout = plt.annotate(
         f"Best: {best_label}, SF={exact(best_params['scale_factor'])}\n" + metric.annotation(best_params),
         xy=(best_params['scale_factor'], best_value),
         xytext=xytext,
@@ -484,12 +526,13 @@ def create_plot(
         ]
         legend1 = plt.legend(handles=imgsz_handles, loc='upper left', title="Image Size", framealpha=0.7)
         plt.gca().add_artist(legend1)
-        plt.gca().add_artist(
-            plt.legend(handles=kernel_handles, loc='center right', title="Opening Kernel", framealpha=0.7)
-        )
+        kernel_legend = plt.legend(handles=kernel_handles, loc='center right', title="Opening Kernel", framealpha=0.7)
+        plt.gca().add_artist(kernel_legend)
+        obstacles.append(kernel_legend)
     else:
         legend1 = plt.legend(handles=legend_elements, loc='best', title="Image Size")
         plt.gca().add_artist(legend1)
+    obstacles.append(legend1)
 
     # Add marker size legend for execution time if requested
     if not no_time:
@@ -507,7 +550,9 @@ def create_plot(
             size_labels.append(f"{time:.1f}s")
 
         # Add execution time legend
-        plt.legend(size_handles, size_labels, loc='lower left', title="Execution Time", framealpha=0.7)
+        obstacles.append(
+            plt.legend(size_handles, size_labels, loc='lower left', title="Execution Time", framealpha=0.7)
+        )
 
     plt.title(title)
     plt.xlabel("Scale Factor")
@@ -521,20 +566,24 @@ def create_plot(
     plt.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
 
     # Add plot annotations in the bottom right
-    plt.text(
-        0.98,
-        0.02,
-        f"Total GT: {best_params['total_gt']}, Matches: {best_params['total_matches']}",
-        transform=plt.gca().transAxes,
-        fontsize=8,
-        alpha=0.7,
-        bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.5),
-        horizontalalignment='right',
-        verticalalignment='bottom',
+    obstacles.append(
+        plt.text(
+            0.98,
+            0.02,
+            f"Total GT: {best_params['total_gt']}, Matches: {best_params['total_matches']}",
+            transform=plt.gca().transAxes,
+            fontsize=8,
+            alpha=0.7,
+            bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.5),
+            horizontalalignment='right',
+            verticalalignment='bottom',
+        )
     )
 
     # Adjust layout
     plt.tight_layout()
+
+    place_callout(plt.gca(), callout, obstacles, candidates)
 
     plt.savefig(output, dpi=dpi, bbox_inches='tight')
     plt.close()

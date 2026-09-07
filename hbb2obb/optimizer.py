@@ -428,13 +428,21 @@ def write_run(
 
 
 # -------------------------------------------------------------------------------- aggregation
-def collect_rows(output_folder: Path, names: Sequence[str]) -> List[dict]:
+def collect_rows(output_folder: Path, names: Sequence[str], metric: Optional[str] = None) -> List[dict]:
     """
-    Read the best grid point of each finished run.
+    Read one grid point per finished run: the best one on ``metric``.
+
+    The sweep records its own winner in ``best_parameters``, which is the ranking metric's. Any
+    other metric has to re-read the grid, or the row reports the point the objective chose scored
+    on a scale that did not pick it, and the table disagrees with the figure beneath it.
 
     Runs with no results yet are skipped rather than reported as zero, so a partial benchmark
     summarises what it actually has.
     """
+    from hbb2obb import plotting
+
+    spec = plotting.resolve_metric(metric)
+    ranking_metric = spec is plotting.METRICS[plotting.DEFAULT_METRIC]
     rows = []
     for name in names:
         folder = output_folder / name
@@ -446,6 +454,11 @@ def collect_rows(output_folder: Path, names: Sequence[str]) -> List[dict]:
         best = data.get("best_parameters")
         if not best:
             continue
+        grid = data.get("all_results") or []
+        if not ranking_metric:
+            # A run that predates the metric keeps the objective's point, so it still appears in
+            # the table with a "-" rather than dropping out of the folder's summary entirely.
+            best = plotting.best_row(grid, spec) or best
 
         models: List[str] = []
         for filename in (RUN_CONFIG_NAME, "config.yaml"):
@@ -458,12 +471,19 @@ def collect_rows(output_folder: Path, names: Sequence[str]) -> List[dict]:
             {
                 "name": name,
                 "sam_models": models or name.split("-"),
-                "n_points": len(data.get("all_results") or []),
+                "n_points": len(grid),
                 "sweep_seconds": data.get("sweep_seconds"),
                 **best,
             }
         )
-    return sorted(rows, key=lambda r: r["avg_iou"], reverse=True)
+
+    def rank(row: dict) -> tuple:
+        value = spec.value(row)
+        if value is None:
+            return (1, 0.0)  # a run that never recorded the metric cannot be ranked by it
+        return (0, -value if spec.higher_is_better else value)
+
+    return sorted(rows, key=rank)
 
 
 def write_summary(
@@ -546,18 +566,33 @@ def write_summary(
             f"{row['total_matches']} / {row['total_gt']} | {row['execution_time']:.1f} s |"
         )
 
+    spec = plotting.resolve_metric(metric)
+    # A folder where nothing recorded the requested metric still gets a summary, headed by the
+    # objective's winner, since that is the only run it can actually rank.
+    if spec is plotting.METRICS[plotting.DEFAULT_METRIC] or spec.value(best) is None:
+        score = f"average IoU {best['avg_iou']:.5f} ± {best['std_iou']:.5f}"
+        ordering = [
+            "Runs are ranked by average IoU, descending. The angle and IoU>=0.9 columns are reported,",
+            "never optimised, and are what to read when runs tie on the mean.",
+            "",
+            "The ± column is the box-to-box spread, not an error bar on the mean. For that, use `sem_iou`",
+            "in each `results.yaml`; the figure below shades ±1 of it around the leading run, and runs",
+            "inside the band are tied.",
+        ]
+    else:
+        score = spec.annotation(best)
+        ordering = [
+            f"Runs are ranked by `{metric}`, and each row is that run's best grid point on it.",
+            f"`{BENCHMARK_SUMMARY_NAME}` is the same folder ranked by average IoU, which is what the",
+            "search optimises.",
+        ]
     lines += [
         "",
         f"**Best overall:** `{' '.join(best['sam_models'])}` at {best['imgsz']} px, scale factor "
         f"{best['scale_factor']:g}, opening kernel {best['opening_kernel_percentage']:g}, "
-        f"average IoU {best['avg_iou']:.5f} ± {best['std_iou']:.5f} in {best['execution_time']:.1f} s.",
+        f"{score} in {best['execution_time']:.1f} s.",
         "",
-        "Runs are ranked by average IoU, descending. The angle and IoU>=0.9 columns are reported,",
-        "never optimised, and are what to read when runs tie on the mean.",
-        "",
-        "The ± column is the box-to-box spread, not an error bar on the mean. For that, use `sem_iou`",
-        "in each `results.yaml`; the figure below shades ±1 of it around the leading run, and runs",
-        "inside the band are tied.",
+        *ordering,
         "",
     ]
 

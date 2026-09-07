@@ -687,3 +687,86 @@ def test_a_run_measured_before_1_9_0_still_writes_its_summary(monkeypatch, tmp_p
     run_summary = (tmp_path / "bench" / "sam_b" / optimizer.SUMMARY_NAME).read_text(encoding="utf-8")
     assert "Average IoU:" in run_summary
     assert "SEM" not in run_summary
+
+
+# ------------------------------------------------- selecting a grid point for a reported metric
+def _two_point_run(folder, models, objective_iou, objective_high, contender_iou, contender_high):
+    """One finished run whose objective winner and whose IoU>=0.9 winner are different points."""
+    folder.mkdir(parents=True)
+    objective = grid_point(sf=0.04, iou=objective_iou)
+    objective["iou_fractions"] = dict(objective["iou_fractions"], **{"0.90": objective_high})
+    contender = grid_point(sf=0.05, iou=contender_iou)
+    contender["iou_fractions"] = dict(contender["iou_fractions"], **{"0.90": contender_high})
+    with open(folder / optimizer.RESULTS_NAME, "w", encoding="utf-8") as f:
+        yaml.dump({"all_results": [objective, contender], "best_parameters": objective}, f)
+    with open(folder / optimizer.RUN_CONFIG_NAME, "w", encoding="utf-8") as f:
+        yaml.dump({"run_name": folder.name, "sam_models": models}, f)
+
+
+def test_a_metric_reports_the_grid_point_that_metric_chose(tmp_path):
+    """
+    A run records one winner and it is the objective's. Reporting that point under another
+    metric's name names settings the metric did not pick, and the table then disagrees with the
+    figure drawn beneath it from the same grid.
+    """
+    bench = tmp_path / "bench"
+    _two_point_run(
+        bench / "sam_b", ["sam_b"], objective_iou=0.90, objective_high=0.41, contender_iou=0.87, contender_high=0.66
+    )
+
+    assert optimizer.collect_rows(bench, ["sam_b"])[0]["scale_factor"] == 0.04
+    assert optimizer.collect_rows(bench, ["sam_b"], metric="avg_iou")[0]["scale_factor"] == 0.04
+    high = optimizer.collect_rows(bench, ["sam_b"], metric="iou_at_90")[0]
+    assert high["scale_factor"] == 0.05
+    assert high["iou_fractions"]["0.90"] == 0.66
+
+
+def test_a_metric_ranks_the_runs_by_that_metric(tmp_path):
+    """The order of the table is the order of the score it is named after, not of the objective."""
+    bench = tmp_path / "bench"
+    _two_point_run(
+        bench / "sam_b", ["sam_b"], objective_iou=0.90, objective_high=0.41, contender_iou=0.87, contender_high=0.72
+    )
+    _two_point_run(
+        bench / "sam_l", ["sam_l"], objective_iou=0.91, objective_high=0.44, contender_iou=0.88, contender_high=0.55
+    )
+    names = ["sam_b", "sam_l"]
+
+    assert [r["name"] for r in optimizer.collect_rows(bench, names)] == ["sam_l", "sam_b"]
+    assert [r["name"] for r in optimizer.collect_rows(bench, names, metric="iou_at_90")] == ["sam_b", "sam_l"]
+    # An error ranks the other way round: the p90 angles are 5.5 everywhere, so this only pins
+    # that a lower-is-better metric is not silently sorted as if higher won.
+    ranked = optimizer.collect_rows(bench, names, metric="p90_angle_error")
+    assert ranked[0]["p90_angle_error"] <= ranked[-1]["p90_angle_error"]
+
+
+def test_a_metric_summary_names_its_own_winner(tmp_path):
+    """The 'Best overall' line and the ranking sentence follow the metric the file is named for."""
+    bench = tmp_path / "bench"
+    _two_point_run(
+        bench / "sam_b", ["sam_b"], objective_iou=0.90, objective_high=0.41, contender_iou=0.87, contender_high=0.66
+    )
+    rows = optimizer.collect_rows(bench, ["sam_b"], metric="iou_at_90")
+
+    out = optimizer.write_summary(
+        bench, rows, bench / "i", bench / "h", bench / "g", "cmd", plot=False, metric="iou_at_90"
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "scale factor 0.05" in text
+    assert "IoU≥0.90: 66.0%" in text
+    assert "ranked by `iou_at_90`" in text
+    # The band exists only for the objective, so the sentence promising one must not travel
+    assert "shades ±1" not in text
+
+
+def test_every_summary_a_sweep_writes_reports_one_wall_time(monkeypatch, tmp_path, no_sweep):
+    """One sweep has one duration; two numbers for it in one folder read as an error."""
+    run_cli(monkeypatch, "-c", str(write_config(tmp_path)))
+    bench = tmp_path / "bench"
+
+    reported = set()
+    for name in [optimizer.BENCHMARK_SUMMARY_NAME] + [f"summary_{m}.md" for m in optimizer.AUTO_PLOT_METRICS]:
+        lines = [ln for ln in (bench / name).read_text(encoding="utf-8").splitlines() if " time: " in ln]
+        assert len(lines) == 1, name
+        reported.add(lines[0])
+    assert len(reported) == 1, reported
