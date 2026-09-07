@@ -1471,7 +1471,7 @@ def main_hbb2obb_optimize():
     # Summarise every run the folder holds, not only the ones this invocation touched, so a
     # resumed or partial benchmark still reports what is actually on disk.
     names = sorted(p.name for p in output_folder.iterdir() if (p / optimizer.RESULTS_NAME).is_file())
-    rows = optimizer.collect_rows(output_folder, names)
+    rows = optimizer.collect_rows(output_folder, names, metric=args.plot_metric)
 
     wrote_provenance = False
     # A --refresh writes no copy of its own, but must still point at the one already on disk.
@@ -1549,12 +1549,14 @@ def main_hbb2obb_optimize():
                 continue
             extra_summary = optimizer.write_summary(
                 output_folder,
-                rows,
+                # Each metric picks its own grid point per run, so it needs its own rows.
+                optimizer.collect_rows(output_folder, names, metric=extra),
                 img_source,
                 hbb_dir,
                 gt_dir,
                 command,
-                elapsed_seconds=None,
+                # The same number the summary beside it reports: one sweep has one wall time.
+                elapsed_seconds=elapsed if swept else None,
                 plot=plot,
                 provenance=wrote_provenance or (output_folder / optimizer.BENCHMARK_PROVENANCE_NAME).is_file(),
                 config_name=config_copy.name if config_copy else None,

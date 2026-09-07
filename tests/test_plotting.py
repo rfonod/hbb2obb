@@ -329,3 +329,87 @@ class TestTheResolutionBand:
         for r in rows:
             r["iou_fractions"] = {"0.90": 0.4}
         assert plotting.comparison_plot(rows, tmp_path / "no_band.png", metric="iou_at_90").is_file()
+
+
+# ------------------------------------------------------------------ placing the "Best:" callout
+CORNERS = [
+    ('left', 'bottom', (20, 20)),
+    ('right', 'bottom', (-20, 20)),
+    ('left', 'top', (20, -20)),
+    ('right', 'top', (-20, -20)),
+]
+
+
+def _callout_at(ax, x, y):
+    return ax.annotate(
+        "Best: 1152px, k=-0.1, SF=0.025\nIoU=0.8859±0.0947",
+        xy=(x, y),
+        xytext=CORNERS[0][2],
+        textcoords='offset points',
+        bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5),
+        fontsize=9,
+        ha=CORNERS[0][0],
+        va=CORNERS[0][1],
+    )
+
+
+def test_a_callout_with_room_around_it_is_left_exactly_where_it_was():
+    """
+    The corner the data leaves free is still the first choice, so a plot that never had a
+    collision renders as it always did. Half the shipped fixture depends on this.
+    """
+    import matplotlib.pyplot as plt
+
+    from hbb2obb import plotting
+
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1])
+    callout = _callout_at(ax, 0.5, 0.5)
+    plotting.place_callout(ax, callout, [], CORNERS)
+    assert (callout.get_ha(), callout.get_va(), tuple(callout.xyann)) == CORNERS[0]
+    plt.close(fig)
+
+
+def test_a_callout_that_would_leave_the_axes_is_moved_inside():
+    """
+    savefig(bbox_inches='tight') does not clip a callout that overflows: it grows the canvas and
+    prints the box over the title or off the side, which is what nine shipped plots did.
+    """
+    import matplotlib.pyplot as plt
+
+    from hbb2obb import plotting
+
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1])
+    callout = _callout_at(ax, 1.0, 1.0)  # top right of the data, offset further up and right
+    plotting.place_callout(ax, callout, [], CORNERS)
+
+    fig.canvas.draw()
+    box = callout.get_window_extent(fig.canvas.get_renderer())
+    frame = ax.get_window_extent()
+    assert box.x1 <= frame.x1 and box.y1 <= frame.y1
+    plt.close(fig)
+
+
+def test_a_callout_moves_off_a_legend_that_holds_its_corner():
+    """A legend is opaque enough to hide the callout under it, so it counts as occupied."""
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    from hbb2obb import plotting
+
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1])
+    handles = [Line2D([0], [0], label=f"entry {i}") for i in range(6)]
+    legend = ax.legend(handles=handles, loc='upper right', title="Opening Kernel")
+    callout = _callout_at(ax, 0.5, 0.5)
+
+    plotting.place_callout(ax, callout, [legend], CORNERS)
+
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    box, blocked = callout.get_window_extent(renderer), legend.get_window_extent(renderer)
+    assert (
+        min(box.x1, blocked.x1) - max(box.x0, blocked.x0) <= 0 or min(box.y1, blocked.y1) - max(box.y0, blocked.y0) <= 0
+    )
+    plt.close(fig)
