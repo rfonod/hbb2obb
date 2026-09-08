@@ -139,6 +139,9 @@ hbb2obb data/images --sam_models sam_b sam_l sam2_b sam2.1_b
 # Evaluate the converted OBBs against ground truth
 hbb2obb-eval data/labels_obb_gt data/labels_obb -mp data/classes.yaml
 
+# Break that score down by what the ground-truth box looks like
+hbb2obb-analyze data/labels_obb_gt data/labels_obb -mp data/classes.yaml
+
 # Look at the result: pan, zoom, step through frames, q to quit
 hbb2obb-view data/images --compare data/labels_obb_gt
 ```
@@ -312,6 +315,7 @@ hbb2obb project/images --hbb_dir project/labels_hbb --obb_dir project/labels_obb
 
 # 4. Evaluate against ground truth, then look at where it went wrong
 hbb2obb-eval project/labels_obb_gt project/labels_obb -mp project/label_map.yaml
+hbb2obb-analyze project/labels_obb_gt project/labels_obb -hd project/labels_hbb -i project/images -o project/analysis
 hbb2obb-view project/images --compare project/labels_obb_gt --show_confidence
 
 # 5. Ship the result in every format your consumers want
@@ -665,8 +669,8 @@ HBB2OBB fits each OBB by prompting SAM with your HBBs, refining the resulting ma
 1. **Load HBB annotations** from YOLO TXT.
 2. **Scale bounding boxes**: positive factors expand HBBs (recover cropped parts), negative factors shrink them (tighten conservative boxes); short and long sides can be scaled differently.
 3. **Segmentation**: run SAM model(s) with the HBBs as prompts.
-4. **Mask aggregation**: with an ensemble, combine masks by majority voting; clip to the scaled HBB region; apply morphological opening.
-5. **Contour extraction**: extract the largest refined mask contour per object (optionally saved with `--save_polygon`).
+4. **Mask aggregation**: with an ensemble, combine masks by majority voting; clip to the scaled HBB region; apply the signed morphological step (positive opens, negative closes).
+5. **Contour extraction**: take the largest contour of the refined mask, plus any other piece holding at least `--fragment_ratio` of its area, so a mask an occluder split is fitted as one object (optionally saved with `--save_polygon`).
 6. **OBB computation**: fit a minimum-area oriented bounding box.
 7. **Fallback**: if no valid mask is found inside an HBB, keep the original HBB as the OBB (confidence `0.0`).
 8. **Confidence**: score each OBB in `[0, 1]` (see [Confidence Scores](#confidence-scores)).
