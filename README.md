@@ -177,17 +177,17 @@ hbb2obb-eval /path/to/ground_truth /path/to/predictions
 Predictions are paired with ground truth by oriented IoU and scored on three things:
 
 ```
-Average IoU: 0.8964 ± 0.0683
-Median IoU: 0.9108
+Average IoU: 0.89642 ± 0.06834 (SEM 0.00483)
+Median IoU: 0.91080
 Matched Boxes Above Threshold: IoU>=0.50: 100.0%  IoU>=0.75: 98.0%  IoU>=0.85: 80.5%  IoU>=0.90: 57.0%
-Orientation Error: median 1.04°, mean 2.11° ± 4.88°, p90 4.40°
+Orientation Error: p90 4.40°, median 1.04°, mean 2.11° ± 4.88°
 
 === Results by Class ===
-     Class  GT  Pred  Matches IoU (mean ± std) Angle err (median °)
-       Car 185   186      185  0.8982 ± 0.0606                 1.00
-       Bus   6     6        6  0.9358 ± 0.0353                 1.33
-     Truck   8     8        8  0.8533 ± 0.1469                 1.56
-Motorcycle   2     1        1  0.6746 ± 0.0000                 9.95
+     Class  GT  Pred  Matches IoU (mean ± std) IoU (median) IoU>=0.9 Angle p90 (°) Angle p50 (°)
+       Car 185   186      185  0.8982 ± 0.0606       0.9106    57.3%          4.36          1.00
+       Bus   6     6        6  0.9358 ± 0.0353       0.9390    66.7%          1.66          1.33
+     Truck   8     8        8  0.8533 ± 0.1469       0.8884    50.0%         13.87          1.56
+Motorcycle   2     1        1  0.6746 ± 0.0000       0.6746     0.0%          9.95          9.95
 ```
 
 Mean IoU alone is a blunt instrument on tight boxes: it saturates, so two settings can tie on it
@@ -328,23 +328,34 @@ hbb2obb-convert project/labels_obb --to dota coco voc -o project/release -mp pro
 hbb2obb-analyze /path/to/ground_truth /path/to/predictions -hd /path/to/labels_hbb -i /path/to/images
 ```
 
+Two of the seven tables it prints, from the 50-frame tuning set of
+[Songdo Vision OBB](https://doi.org/10.5281/zenodo.15050578):
+
 ```
 ### By ground-truth orientation, interior and not difficult (3840 boxes)
 
-                             Boxes   IoU (mean)   IoU (median)   IoU<0.75   IoU>=0.9   Angle p90
-  axis-aligned (<0.005 deg)   2694       0.9239         0.9335       0.4%      80.4%        0.00
-  rotated                     1146       0.8385         0.8572      12.2%      21.6%        5.23
-  off-axis 5 to 15 deg         149       0.8500         0.8601       9.4%      23.5%        6.99
-  off-axis 15 to 30 deg        665       0.8200         0.8386      15.5%      13.2%        5.82
-  off-axis 30 to 45 deg         85       0.7976         0.8231      27.1%      14.1%        5.35
+                              Boxes   IoU (mean)   IoU (median)   IoU<0.75   IoU>=0.9   Angle p90   Angle mean
+  axis-aligned (<0.005 deg)    2694       0.9239         0.9335       0.4%      80.4%        0.00         0.15
+  rotated                      1146       0.8385         0.8572      12.2%      21.6%        5.23         2.89
+  off-axis 0 to 5 deg          2941       0.9215         0.9306       0.4%      77.5%        1.26         0.30
+  off-axis 5 to 15 deg          149       0.8500         0.8601       9.4%      23.5%        6.99         3.56
+  off-axis 15 to 30 deg         665       0.8200         0.8386      15.5%      13.2%        5.82         3.00
+  off-axis 30 to 45 deg          85       0.7976         0.8231      27.1%      14.1%        5.35         3.46
 
 ### Against doing nothing
 
-                             Boxes   IoU as-is   IoU converted     Gain
-  all                         4245      0.8617          0.8857   +0.0240
-  axis-aligned (<0.005 deg)   2900      0.9816          0.9227   -0.0589
-  rotated                     1345      0.6032          0.8059   +0.2028
+                              Boxes   IoU as-is   IoU converted      Gain   Angle p90 as-is   Angle p90 converted
+  all                          4245      0.8617          0.8857   +0.0240             22.69                  3.46
+  axis-aligned (<0.005 deg)    2900      0.9816          0.9227   -0.0589              0.00                  0.00
+  rotated                      1345      0.6032          0.8059   +0.2028             27.77                 16.58
+  off-axis 0 to 5 deg          3159      0.9725          0.9204   -0.0521              0.00                  1.25
+  off-axis 5 to 15 deg          162      0.7034          0.8445   +0.1411             13.57                  8.22
+  off-axis 15 to 30 deg         820      0.5187          0.7774   +0.2587             25.68                 21.88
+  off-axis 30 to 45 deg         104      0.4464          0.7505   +0.3041             43.50                 19.51
 ```
+
+`rotated` is every box off the axes and overlaps the bands below it, which answer a different
+question; `axis-aligned` and `rotated` alone partition the set.
 
 Every cut is a property of the ground-truth box, never of the prediction. Matching is
 `hbb2obb-eval`'s own, so a pair scored here is the pair it scored.

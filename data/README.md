@@ -113,7 +113,7 @@ Against the hand-drawn ground truth of step 5, the detector misses one motorcycl
 hbb2obb data/images --save_img --save_confidence --save_polygon --confidence_source combined
 ```
 
-This writes `labels_obb/<frame>.txt` (with the confidence column), the `--save_img` overlays beside them, and `labels_polygon/<frame>.txt`. It uses the defaults otherwise: a single `sam_b` model, `--imgsz 1280`, `--scale_factors 0.05`, `--opening_kernel_percentage 0.15`. Better results are available from a model ensemble and tuned hyperparameters, as described in the main README.
+This writes `labels_obb/<frame>.txt` (with the confidence column), the `--save_img` overlays beside them, and `labels_polygon/<frame>.txt`. It uses the defaults otherwise: a single `sam_b` model, `--imgsz 1280`, `--scale_factors 0.05`, `--opening_kernel_percentage 0.15`, `--fragment_ratio 0.1`. Better results are available from a model ensemble and tuned hyperparameters, as described in the main README.
 
 `--confidence_source combined` multiplies the conversion quality by the detector confidence from step 1. Drop the flag for the `conversion` score alone, or pass `detector` for the input confidence alone; all three work here, since step 1 wrote that 6th column. [Confidence scores](../README.md#confidence-scores) in the main README explains what the score means and how to act on it.
 
@@ -177,20 +177,28 @@ Total Predicted/Converted Boxes: 201
 Total Matched Boxes: 200
 Total Unmatched GT Boxes: 1
 Total Unmatched Pred Boxes: 1
-Average IoU: 0.8964 ± 0.0683
-Median IoU: 0.9108
+Average IoU: 0.89642 ± 0.06834 (SEM 0.00483)
+Median IoU: 0.91080
 Matched Boxes Above Threshold: IoU>=0.50: 100.0%  IoU>=0.75: 98.0%  IoU>=0.85: 80.5%  IoU>=0.90: 57.0%
-Orientation Error: median 1.04°, mean 2.11° ± 4.88°, p90 4.40°
+Orientation Error: p90 4.40°, median 1.04°, mean 2.11° ± 4.88°
 
 === Results by Class ===
-Class  GT  Pred  Matches IoU (mean ± std) Angle err (median °)
-    0 185   186      185  0.8982 ± 0.0606                 1.00
-    1   6     6        6  0.9358 ± 0.0353                 1.33
-    2   8     8        8  0.8533 ± 0.1469                 1.56
-    3   2     1        1  0.6746 ± 0.0000                 9.95
+Class  GT  Pred  Matches IoU (mean ± std) IoU (median) IoU>=0.9 Angle p90 (°) Angle p50 (°)
+    0 185   186      185  0.8982 ± 0.0606       0.9106    57.3%          4.36          1.00
+    1   6     6        6  0.9358 ± 0.0353       0.9390    66.7%          1.66          1.33
+    2   8     8        8  0.8533 ± 0.1469       0.8884    50.0%         13.87          1.56
+    3   2     1        1  0.6746 ± 0.0000       0.6746     0.0%          9.95          9.95
 ```
 
 The one unmatched box on each side is the pair from step 1: the motorcycle the detector missed has no converted box, and the edge-cut car it found has no ground truth box. Everything the detector did find converted, and matched. The evaluator ignores the trailing confidence column, so it reads the converted files as they are written in step 2. For more options, such as excluding specific classes, class-agnostic matching or a different IoU threshold, run `hbb2obb-eval --help`.
+
+To see where those numbers come from, cut the same pairs by the ground truth's orientation, size, frame edge and class:
+
+```bash
+hbb2obb-analyze data/labels_obb_gt data/labels_obb -hd data/labels_hbb -i data/images -mp data/classes.yaml
+```
+
+Add `-o DIR` to write the report, a YAML and a three-panel figure as well as printing it. With 201 boxes over 3 frames most of its groups are too small to read anything into; the [main README](../README.md#breaking-down-an-evaluation) describes what it reports.
 
 The three scores answer different questions and only the first saturates. Class 3, the single matched motorcycle, is where they disagree most: its IoU of 0.67 is poor but readable, while its 9.95° of orientation error against 1.00° for cars says plainly that a short, nearly square box is the case this conversion handles worst.
 
@@ -227,7 +235,7 @@ hbb2obb-view data/images --obb_format dota             # read the DOTA files ins
 
 The `benchmark_results` directory holds the sweeps described in step 6, one subfolder per set of SAM models. They are shipped **for illustration**: to show what the optimizer produces and what its artifacts look like. They are measured against the boxes this folder ships, so step 6 reproduces them.
 
-They were measured before the orientation error and the IoU ladder were recorded, so their `results.yaml` files hold neither. The readers cope with that rather than crashing: `--refresh` leaves those columns empty, and `--plot_metric` on one of the newer metrics reports that no grid point recorded it. A fresh run of step 6 fills them in, and writes the `plot_median_angle_error.png`, `plot_iou_at_90.png` and matching `comparison_*.png` / `summary_*.md` that this folder, measured before they existed, does not ship.
+They were measured before the orientation error, the IoU ladder and the fragment ratio were recorded, so their `results.yaml` files hold none of them. The readers cope with that rather than crashing: `--refresh` leaves those columns empty, and `--plot_metric` on one of the newer metrics reports that no grid point recorded it. A fresh run of step 6 fills them in, and writes the `plot_median_angle_error.png`, `plot_iou_at_90.png` and matching `comparison_*.png` / `summary_*.md` that this folder, measured before they existed, does not ship. `--resume` re-runs them for the same reason: a grid point that records no fragment ratio was measured with the largest mask piece alone, which is not what the config now asks for.
 
 **[`benchmark_results/summary.md`](benchmark_results/summary.md) is the generated write-up:** every run's best grid point in one table, sorted by IoU, with the winner named and `comparison.png` showing accuracy against compute. [`benchmark_results/PROVENANCE.txt`](benchmark_results/PROVENANCE.txt) records the checkpoint hashes, the hashes of the label sets the numbers were measured against, a digest of the hbb2obb source that ran, the library versions and the command. Both are written by the command that produces the runs, and `benchmark.yaml` is copied in beside them.
 
