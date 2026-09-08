@@ -11,13 +11,14 @@
 - 🎯 **Accurate OBBs from HBBs**: prompts SAM-family segmentation models with your existing horizontal boxes to fit tight oriented boxes around non-upright objects, with no re-annotation required.
 - 🚗 **No HBBs? Detect them**: `hbb2obb-detect` runs an Ultralytics detector over your images and writes the horizontal boxes the conversion consumes, confidence column included ([details](#detecting-hbbs)).
 - 🧩 **Model ensemble**: combines masks from multiple SAM variants through majority voting for more robust, accurate results (see [Usage](#usage)).
-- 🛡️ **Spatially constrained & safe**: region-specific masking and contour refinement keep segmentation inside the object, and a fallback keeps the original HBB when no valid mask is found.
+- 🛡️ **Spatially constrained & safe**: region-specific masking and contour refinement keep segmentation inside the object, a mask split by an occluder is fitted back together, and a fallback keeps the original HBB when no valid mask is found.
 - 🔎 **Confidence-scored output**: every OBB gets a quality score in `[0, 1]` that flags silent fallbacks and low-confidence conversions, so you know which boxes to trust; your detector's own confidence can be carried through instead of, or on top of, that score (see [Confidence scores](#confidence-scores)).
 - 📐 **Flexible scaling**: positive or negative scale factors (optionally different for the short and long sides) recover cropped object parts or tighten overly conservative annotations.
 - 📊 **Evaluate & optimize**: evaluation against ground truth on IoU, orientation error and the share of boxes above a high IoU bar, plus `hbb2obb-optimize`, a hyperparameter search over SAM inference resolution × scale factors × opening kernel, driven by a config file so a whole benchmark is one reproducible command ([details](#tuning-hyperparameters)).
+- 🔬 **Where the score comes from**: `hbb2obb-analyze` breaks one evaluation down by the ground truth's orientation, size, frame edge, difficulty and class, and scores the conversion against emitting the horizontal prompt unchanged ([details](#breaking-down-an-evaluation)).
 - 🔄 **Six annotation formats**: read and write YOLO, DOTA, Pascal VOC, COCO and LabelMe, for horizontal and oriented boxes alike, with a check that proves every format encodes the same boxes ([details](#converting-between-formats)).
 - 🔍 **Interactive viewer**: `hbb2obb-view` pans and zooms over your annotations, in any format, coloring boxes by confidence and overlaying predictions against ground truth ([details](#inspecting-annotations)).
-- ⚙️ **CLI + Python API**: `hbb2obb`, `hbb2obb-detect`, `hbb2obb-eval`, `hbb2obb-convert`, `hbb2obb-view` and `hbb2obb-optimize` commands plus an importable API, with transparent visualizations of every step.
+- ⚙️ **CLI + Python API**: `hbb2obb`, `hbb2obb-detect`, `hbb2obb-eval`, `hbb2obb-analyze`, `hbb2obb-convert`, `hbb2obb-view` and `hbb2obb-optimize` commands plus an importable API, with transparent visualizations of every step.
 
 <details>
 <summary><b>📋 Full Feature Overview</b></summary>
@@ -30,6 +31,7 @@
 - **Confidence scoring**: a per-OBB quality score flags fallbacks and low-confidence conversions for triage, optionally combined with the detector confidence from the input, written as an extra column or to a side-car directory that leaves the label files standard ([details](#confidence-scores)).
 - **Polygon output**: optionally save the segmentation contour behind each OBB, row-aligned with the OBB file, as a tighter object outline for downstream masking ([details](#data-format)).
 - **Evaluation tools**: assess OBB accuracy against ground truth on mean and median IoU, orientation error, and the share of matched boxes above IoU 0.5, 0.75, 0.85 and 0.9, overall and per class.
+- **Accuracy breakdown**: cut one evaluation by ground-truth orientation, size, frame edge, `difficult` flag and class, beside an identity baseline and the converted-to-reference side ratios, as a report, a YAML and a figure.
 - **Hyperparameter optimization**: search SAM inference resolutions, HBB scale factors and opening kernels for the best settings on your data, one sweep at a time or a whole benchmark from a config file.
 - **Provenance records**: `--save_provenance` writes the command, the versions, a digest of the source that ran and the SHA-256 of every checkpoint, so a released annotation set can be regenerated rather than trusted.
 - **Visualization tools**: render HBBs, segmentation masks, derived contours, and resulting OBBs.
@@ -137,6 +139,9 @@ hbb2obb data/images --sam_models sam_b sam_l sam2_b sam2.1_b
 # Evaluate the converted OBBs against ground truth
 hbb2obb-eval data/labels_obb_gt data/labels_obb -mp data/classes.yaml
 
+# Break that score down by what the ground-truth box looks like
+hbb2obb-analyze data/labels_obb_gt data/labels_obb -mp data/classes.yaml
+
 # Look at the result: pan, zoom, step through frames, q to quit
 hbb2obb-view data/images --compare data/labels_obb_gt
 ```
@@ -175,17 +180,17 @@ hbb2obb-eval /path/to/ground_truth /path/to/predictions
 Predictions are paired with ground truth by oriented IoU and scored on three things:
 
 ```
-Average IoU: 0.8964 ± 0.0683
-Median IoU: 0.9108
+Average IoU: 0.89642 ± 0.06834 (SEM 0.00483)
+Median IoU: 0.91080
 Matched Boxes Above Threshold: IoU>=0.50: 100.0%  IoU>=0.75: 98.0%  IoU>=0.85: 80.5%  IoU>=0.90: 57.0%
-Orientation Error: median 1.04°, mean 2.11° ± 4.88°, p90 4.40°
+Orientation Error: p90 4.40°, median 1.04°, mean 2.11° ± 4.88°
 
 === Results by Class ===
-     Class  GT  Pred  Matches IoU (mean ± std) Angle err (median °)
-       Car 185   186      185  0.8982 ± 0.0606                 1.00
-       Bus   6     6        6  0.9358 ± 0.0353                 1.33
-     Truck   8     8        8  0.8533 ± 0.1469                 1.56
-Motorcycle   2     1        1  0.6746 ± 0.0000                 9.95
+     Class  GT  Pred  Matches IoU (mean ± std) IoU (median) IoU>=0.9 Angle p90 (°) Angle p50 (°)
+       Car 185   186      185  0.8982 ± 0.0606       0.9106    57.3%          4.36          1.00
+       Bus   6     6        6  0.9358 ± 0.0353       0.9390    66.7%          1.66          1.33
+     Truck   8     8        8  0.8533 ± 0.1469       0.8884    50.0%         13.87          1.56
+Motorcycle   2     1        1  0.6746 ± 0.0000       0.6746     0.0%          9.95          9.95
 ```
 
 Mean IoU alone is a blunt instrument on tight boxes: it saturates, so two settings can tie on it
@@ -206,7 +211,8 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--sam_models` / `-sm`: SAM model(s) to use (e.g. `sam_b`, `sam_l`, `sam2_b`, `sam2.1_b`, `sam3`, `mobile_sam`, `FastSAM-s`).
 - `--imgsz`: SAM inference resolution (default: 1280).
 - `--scale_factors` / `-sf`: factor(s) to scale HBBs (single value, or two values for short/long sides).
-- `--opening_kernel_percentage` / `-okp`: morphological kernel size as a fraction of the mask's smaller dimension. **Positive opens** (erodes then dilates, removing thin protrusions), **negative closes** (dilates then erodes, filling holes and rejoining a fragmented mask), `0` disables it. Closing matters because only the largest contour is kept, so a vehicle split by glare or an occluding pole loses the smaller piece otherwise.
+- `--opening_kernel_percentage` / `-okp`: morphological kernel size as a fraction of the mask's smaller dimension. **Positive opens** (erodes then dilates, removing thin protrusions), **negative closes** (dilates then erodes, filling holes and rejoining a fragmented mask), `0` disables it. Closing runs before the contours are taken, so it rejoins a vehicle split by glare or an occluding pole while the pieces are still close enough to bridge.
+- `--fragment_ratio` / `-fr`: minimum area, as a fraction of the largest mask piece's, for another piece to be fitted together with it rather than discarded (default: `0.1`). `0` fits the largest piece alone.
 - `--save_confidence`: append a per-OBB [confidence score](#confidence-scores) as a 10th column in the output TXT files.
 - `--confidence_dir` / `-cd`: write those scores to their own directory instead, one score per line, row-aligned with the labels. Use it when the label files have to stay strictly standard, since Ultralytics and other YOLO OBB readers reject a 10th column. Give it bare for `img_source/../labels_confidence`.
 - `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
@@ -309,6 +315,7 @@ hbb2obb project/images --hbb_dir project/labels_hbb --obb_dir project/labels_obb
 
 # 4. Evaluate against ground truth, then look at where it went wrong
 hbb2obb-eval project/labels_obb_gt project/labels_obb -mp project/label_map.yaml
+hbb2obb-analyze project/labels_obb_gt project/labels_obb -hd project/labels_hbb -i project/images -o project/analysis
 hbb2obb-view project/images --compare project/labels_obb_gt --show_confidence
 
 # 5. Ship the result in every format your consumers want
@@ -316,6 +323,62 @@ hbb2obb-convert project/labels_obb --to dota coco voc -o project/release -mp pro
 ```
 
 </details>
+
+### Breaking Down an Evaluation
+
+`hbb2obb-eval` gives one number per metric. `hbb2obb-analyze` says where it came from:
+
+```bash
+hbb2obb-analyze /path/to/ground_truth /path/to/predictions -hd /path/to/labels_hbb -i /path/to/images
+```
+
+Two of the seven tables it prints, from the 50-frame tuning set of
+[Songdo Vision OBB](https://doi.org/10.5281/zenodo.15050578):
+
+```
+### By ground-truth orientation, interior and not difficult (3840 boxes)
+
+                              Boxes   IoU (mean)   IoU (median)   IoU<0.75   IoU>=0.9   Angle p90   Angle mean
+  axis-aligned (<0.005 deg)    2694       0.9239         0.9335       0.4%      80.4%        0.00         0.15
+  rotated                      1146       0.8385         0.8572      12.2%      21.6%        5.23         2.89
+  off-axis 0 to 5 deg          2941       0.9215         0.9306       0.4%      77.5%        1.26         0.30
+  off-axis 5 to 15 deg          149       0.8500         0.8601       9.4%      23.5%        6.99         3.56
+  off-axis 15 to 30 deg         665       0.8200         0.8386      15.5%      13.2%        5.82         3.00
+  off-axis 30 to 45 deg          85       0.7976         0.8231      27.1%      14.1%        5.35         3.46
+
+### Against doing nothing
+
+                              Boxes   IoU as-is   IoU converted      Gain   Angle p90 as-is   Angle p90 converted
+  all                          4245      0.8617          0.8857   +0.0240             22.69                  3.46
+  axis-aligned (<0.005 deg)    2900      0.9816          0.9227   -0.0589              0.00                  0.00
+  rotated                      1345      0.6032          0.8059   +0.2028             27.77                 16.58
+  off-axis 0 to 5 deg          3159      0.9725          0.9204   -0.0521              0.00                  1.25
+  off-axis 5 to 15 deg          162      0.7034          0.8445   +0.1411             13.57                  8.22
+  off-axis 15 to 30 deg         820      0.5187          0.7774   +0.2587             25.68                 21.88
+  off-axis 30 to 45 deg         104      0.4464          0.7505   +0.3041             43.50                 19.51
+```
+
+`rotated` is every box off the axes and overlaps the bands below it, which answer a different
+question; `axis-aligned` and `rotated` alone partition the set.
+
+Every cut is a property of the ground-truth box, never of the prediction. Matching is
+`hbb2obb-eval`'s own, so a pair scored here is the pair it scored.
+
+Cuts reported: ground-truth orientation, orientation again on the interior boxes not flagged
+`difficult`, ground-truth short side, frame edge, the `difficult` flag, and class. Beside them:
+
+- **The identity baseline.** A horizontal box is already a valid oriented box, so `--hbb_dir`
+  scores the conversion against emitting the prompt unchanged. On a ground truth that is mostly
+  square to the image, this is what separates the boxes the conversion earned from the boxes the
+  prompt already had.
+- **The side ratios.** How wide and how long the converted box is against the reference, by how far
+  the reference is turned off the image axes. A step confined to the short side, across a boundary
+  the geometry crosses continuously, is a property of the reference rather than of the conversion.
+
+`--out_dir` / `-o` writes `analysis.md`, `analysis.yaml` and a three-panel `analysis.png` as well as
+printing the report. `-i` / `--img_source` supplies the frame sizes the edge cut needs; the
+`difficult` flag is read from a `.dota` file beside the ground-truth `.txt`, if there is one, and
+`-bc` / `--boundary_classes` holds the side-ratio table to one class.
 
 ### Detecting HBBs
 
@@ -606,8 +669,8 @@ HBB2OBB fits each OBB by prompting SAM with your HBBs, refining the resulting ma
 1. **Load HBB annotations** from YOLO TXT.
 2. **Scale bounding boxes**: positive factors expand HBBs (recover cropped parts), negative factors shrink them (tighten conservative boxes); short and long sides can be scaled differently.
 3. **Segmentation**: run SAM model(s) with the HBBs as prompts.
-4. **Mask aggregation**: with an ensemble, combine masks by majority voting; clip to the scaled HBB region; apply morphological opening.
-5. **Contour extraction**: extract the largest refined mask contour per object (optionally saved with `--save_polygon`).
+4. **Mask aggregation**: with an ensemble, combine masks by majority voting; clip to the scaled HBB region; apply the signed morphological step (positive opens, negative closes).
+5. **Contour extraction**: take the largest contour of the refined mask, plus any other piece holding at least `--fragment_ratio` of its area, so a mask an occluder split is fitted as one object (optionally saved with `--save_polygon`).
 6. **OBB computation**: fit a minimum-area oriented bounding box.
 7. **Fallback**: if no valid mask is found inside an HBB, keep the original HBB as the OBB (confidence `0.0`).
 8. **Confidence**: score each OBB in `[0, 1]` (see [Confidence Scores](#confidence-scores)).

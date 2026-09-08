@@ -152,6 +152,7 @@ def test_conversion_provenance_records_the_command_and_the_checkpoints(tmp_path)
         imgsz=1280,
         scale_factors=[0.05],
         opening_kernel_percentage=0.15,
+        fragment_ratio=0.1,
         confidence_source="combined",
         models_dir=models,
     )
@@ -176,6 +177,7 @@ def test_conversion_provenance_records_the_inference_device(tmp_path):
         imgsz=1280,
         scale_factors=[0.05],
         opening_kernel_percentage=0.15,
+        fragment_ratio=0.1,
         device="cuda:0",
         models_dir=tmp_path / "models",
     )
@@ -195,6 +197,7 @@ def test_conversion_provenance_reports_a_missing_checkpoint(tmp_path):
         imgsz=1280,
         scale_factors=[0.05],
         opening_kernel_percentage=0.15,
+        fragment_ratio=0.1,
         models_dir=tmp_path / "models",
     )
 
@@ -213,6 +216,7 @@ def test_an_even_ensemble_is_flagged_as_stricter(tmp_path):
         imgsz=1280,
         scale_factors=[0.05],
         opening_kernel_percentage=0.15,
+        fragment_ratio=0.1,
         models_dir=tmp_path,
     )
     assert "even-sized ensemble is stricter" in out.read_text()
@@ -320,6 +324,7 @@ def test_conversion_provenance_records_the_coordinate_convention(tmp_path):
         imgsz=1280,
         scale_factors=[0.05],
         opening_kernel_percentage=0.15,
+        fragment_ratio=0.1,
         models_dir=tmp_path / "models",
         normalize=True,
         precision=6,
@@ -342,6 +347,7 @@ def test_absolute_conversion_output_claims_no_decimals(tmp_path):
         imgsz=1280,
         scale_factors=[0.05],
         opening_kernel_percentage=0.15,
+        fragment_ratio=0.1,
         models_dir=tmp_path / "models",
     )
 
@@ -410,6 +416,7 @@ def test_conversion_provenance_records_where_the_confidence_went(tmp_path):
         imgsz=1280,
         scale_factors=[0.05],
         opening_kernel_percentage=0.15,
+        fragment_ratio=0.1,
         models_dir=tmp_path / "models",
     )
 
@@ -433,6 +440,7 @@ def test_a_bare_confidence_dir_is_recorded_as_given(tmp_path):
         imgsz=1280,
         scale_factors=[0.05],
         opening_kernel_percentage=0.15,
+        fragment_ratio=0.1,
         models_dir=tmp_path / "models",
     )
 

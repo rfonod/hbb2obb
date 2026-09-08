@@ -15,12 +15,13 @@ from hbb2obb import optimizer
 from hbb2obb.cli import SUPPORTED_SAM_MODELS, main_hbb2obb_optimize
 
 
-def grid_point(imgsz=1280, sf=0.05, ok=0.15, iou=0.9, angle=2.5):
+def grid_point(imgsz=1280, sf=0.05, ok=0.15, iou=0.9, angle=2.5, fragment_ratio=0.1):
     """One entry of all_results, with every key the writers read."""
     return {
         "imgsz": imgsz,
         "scale_factor": sf,
         "opening_kernel_percentage": ok,
+        "fragment_ratio": fragment_ratio,
         "avg_iou": iou,
         "std_iou": 0.07,
         "median_iou": iou + 0.01,
@@ -196,6 +197,33 @@ def test_a_run_measured_on_a_different_grid_is_not_complete(tmp_path):
     assert not optimizer.is_complete(folder, retuned)
 
 
+def test_a_run_swept_at_another_fragment_ratio_is_not_complete(tmp_path):
+    """
+    fragment_ratio is fixed rather than swept, so it never shows up as a grid point; a resume
+    that went on the grid alone would keep numbers measured at one value and report them under
+    another. A point recorded before the setting existed counts as 0.
+    """
+    folder = tmp_path / "x"
+    folder.mkdir()
+    (folder / optimizer.RESULTS_NAME).write_text(
+        yaml.dump({"all_results": [grid_point(imgsz=1024, sf=0.0, fragment_ratio=0.1)]}), encoding="utf-8"
+    )
+    spec = optimizer.RunSpec(name="x", sam_models=["sam_b"], imgsz=[1024], scale_factors=[0.0], opening_kernels=[0.15])
+    assert optimizer.is_complete(folder, spec)
+
+    spec.fragment_ratio = 0.25
+    assert not optimizer.is_complete(folder, spec)
+
+    (folder / optimizer.RESULTS_NAME).write_text(
+        yaml.dump(
+            {"all_results": [{k: v for k, v in grid_point(imgsz=1024, sf=0.0).items() if k != "fragment_ratio"}]}
+        ),
+        encoding="utf-8",
+    )
+    spec.fragment_ratio = 0.0
+    assert optimizer.is_complete(folder, spec)
+
+
 # ---------------------------------------------------------------------------------- artifacts
 def test_write_run_writes_the_four_files(tmp_path):
     spec = optimizer.RunSpec(name="sam_b", sam_models=["sam_b"], imgsz=[1280], scale_factors=[0.04, 0.05])
@@ -303,6 +331,9 @@ def test_dry_run_runs_nothing(monkeypatch, tmp_path, capsys, no_sweep):
     assert no_sweep == []
     out = capsys.readouterr().out
     assert "Total          : 4 conversions" in out
+    # The fragment ratio is not a grid axis, so the grid lines never mention it; a sweep about to
+    # run unattended for hours still has to be able to show that the config's value took.
+    assert "Fragment ratio : 0.1" in out
     assert not (tmp_path / "bench" / optimizer.BENCHMARK_SUMMARY_NAME).exists()
     # It reports what would happen and writes nothing, the output folder included: a typo there
     # should not leave a stray empty directory behind.

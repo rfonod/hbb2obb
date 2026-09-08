@@ -20,6 +20,13 @@ _MODEL_CACHE: Dict[str, Any] = {}
 # caller reaching for it need not know which module owns it.
 DEFAULT_NORMALIZED_PRECISION = formats.DEFAULT_NORMALIZED_PRECISION
 
+# A mask piece at least this fraction of the largest piece's area is fitted together with it,
+# rather than discarded. An occluder crossing a vehicle - a pole, a gantry, a wire - splits the
+# mask in two, and taking the largest piece alone then fits a box to half a car. On the Songdo
+# Vision OBB tuning set a piece this large appears on 8 boxes in 4245 and is a genuine part of
+# the vehicle every time; below this floor the pieces are neighbours and noise.
+DEFAULT_FRAGMENT_RATIO = 0.1
+
 
 def sam_checkpoint_path(model_name: str, models_dir: Path = Path('models')) -> Path:
     """
@@ -86,6 +93,7 @@ def hbb2obb(
     imgsz: int = 1280,
     scale_factors: Union[float, Tuple[float, float], List[float]] = 0.05,
     opening_kernel_percentage: float = 0.15,
+    fragment_ratio: float = DEFAULT_FRAGMENT_RATIO,
     save_img: bool = False,
     viz_dir: Path = None,
     show_hbb: bool = True,
@@ -114,6 +122,9 @@ def hbb2obb(
         opening_kernel_percentage: Fraction of the mask's smaller dimension used as the
                      morphological kernel. Positive opens (removes thin protrusions), negative
                      closes (fills holes, rejoins fragments), 0 disables it
+        fragment_ratio: Minimum area, as a fraction of the largest mask piece's, for another
+                     piece to be fitted together with it rather than discarded; 0 fits the
+                     largest piece alone
         save_img: Save visualization images
         viz_dir: Directory to save visualization images
         show_hbb: Show horizontal bounding boxes
@@ -198,7 +209,7 @@ def hbb2obb(
 
     # Convert segmentation masks within HBBs to OBB annotations
     obb_annotations, aggregated_masks, contours, confidences = create_obb_annotations_multi_model(
-        bbox_prompts, masks_all_models, opening_kernel_percentage
+        bbox_prompts, masks_all_models, opening_kernel_percentage, fragment_ratio
     )
 
     # Blend in the detector confidence from the HBB file, but only when a caller actually asked
@@ -329,8 +340,37 @@ def resolve_confidences(
     return resolved
 
 
+def merge_fragment_contours(
+    contours: Sequence[np.ndarray], largest: np.ndarray, fragment_ratio: float
+) -> List[np.ndarray]:
+    """
+    The contours to fit the rotated box to: the largest one, plus any other piece holding at
+    least ``fragment_ratio`` of its area.
+
+    Closing the mask rejoins fragments that are close enough to bridge; this catches the ones
+    that are not, where the occluder is wider than the kernel. Everything here is already
+    clipped to the expanded HBB, which is what bounds how far a merge can reach.
+
+    Args:
+        contours: All contours found in the mask, in any order
+        largest: The largest valid contour, which is always kept
+        fragment_ratio: Minimum area of a second piece as a fraction of the largest one's;
+                        0 or less keeps the largest contour alone
+
+    Returns:
+        The contours to fit together, always beginning with ``largest``.
+    """
+    if fragment_ratio <= 0:
+        return [largest]
+    floor = fragment_ratio * cv2.contourArea(largest)
+    return [largest] + [c for c in contours if c is not largest and cv2.contourArea(c) >= floor]
+
+
 def create_obb_annotations_multi_model(
-    hbb_boxes: np.ndarray, masks_all_models: List[np.ndarray], opening_kernel_percentage: float
+    hbb_boxes: np.ndarray,
+    masks_all_models: List[np.ndarray],
+    opening_kernel_percentage: float,
+    fragment_ratio: float = DEFAULT_FRAGMENT_RATIO,
 ) -> Tuple[np.ndarray, List[np.ndarray], List[np.ndarray], List[float]]:
     """
     Convert segmentation masks from multiple SAM models inside the HBBs to OBB annotations
@@ -348,6 +388,8 @@ def create_obb_annotations_multi_model(
         masks_all_models: List of masks from different SAM models
         opening_kernel_percentage: Fraction of mask size for the morphological kernel; positive opens,
                      negative closes, 0 disables it
+        fragment_ratio: Minimum area, as a fraction of the largest contour's, for a second mask
+                     piece to be fitted together with it; 0 or less fits the largest alone
 
     Returns:
         Tuple containing:
@@ -437,19 +479,26 @@ def create_obb_annotations_multi_model(
             confidences.append(0.0)
             continue
 
-        # Choose largest valid contour
+        # Choose largest valid contour, then take back any piece of the object the occluder
+        # separated from it. The stored contour is the largest one untouched whenever nothing is
+        # merged, so a single-piece mask writes exactly the polygon it always did; where pieces
+        # are fitted together it is their convex hull, whose minAreaRect is the same box.
         largest_hbb_contour = max(valid_hbb_contours, key=cv2.contourArea)
-        contours.append(largest_hbb_contour)
+        parts = merge_fragment_contours(hbb_contours, largest_hbb_contour, fragment_ratio)
+        fitted_contour = cv2.convexHull(np.vstack(parts)) if len(parts) > 1 else largest_hbb_contour
+        contours.append(fitted_contour)
 
         # Compute OBB
-        rect = cv2.minAreaRect(largest_hbb_contour)
+        rect = cv2.minAreaRect(fitted_contour)
         box_points = cv2.boxPoints(rect).flatten().astype(np.int32)
         obb_annotations.append([int(label), *box_points])
 
         # Confidence = rectangularity (fit of the rotated box to the mask) * ensemble consensus.
         # Rectangularity: contour area over the min-area rotated rect area, clipped to [0, 1].
+        # The area is the pieces' own, not the hull's, so bridging a gap cannot raise the score.
         rect_area = rect[1][0] * rect[1][1]
-        rectangularity = min(cv2.contourArea(largest_hbb_contour) / rect_area, 1.0) if rect_area > 0 else 0.0
+        mask_area = sum(cv2.contourArea(c) for c in parts)
+        rectangularity = min(mask_area / rect_area, 1.0) if rect_area > 0 else 0.0
         # Consensus: fraction of the per-model union that survived the majority vote (1.0 for one model).
         union_mask = np.logical_or.reduce(best_hbb_masks)
         union_sum = union_mask.sum()
