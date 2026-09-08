@@ -205,12 +205,19 @@ def is_complete(folder: Path, spec: RunSpec) -> bool:
     except yaml.YAMLError:
         return False
 
+    points = data.get("all_results") or []
     measured = {
         (int(r["imgsz"]), float(r["scale_factor"]), float(r["opening_kernel_percentage"]))
-        for r in (data.get("all_results") or [])
+        for r in points
         if {"imgsz", "scale_factor", "opening_kernel_percentage"} <= set(r)
     }
-    return measured == {(int(i), float(sf), float(ok)) for i, sf, ok in spec.grid}
+    if measured != {(int(i), float(sf), float(ok)) for i, sf, ok in spec.grid}:
+        return False
+
+    # fragment_ratio is not an axis, but it changes the boxes that were measured, so a folder
+    # swept at another value is not this run's result. A point that records none was measured
+    # with the largest piece alone, which is what 0 means.
+    return all(float(r.get("fragment_ratio", 0.0)) == float(spec.fragment_ratio) for r in points)
 
 
 def sweep(

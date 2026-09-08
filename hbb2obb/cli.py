@@ -1203,9 +1203,7 @@ def main_hbb2obb_analyze():
         help="Image or directory of images, for the frame-edge cut and for relative HBB coordinates",
     )
     parser.add_argument("--map_path", "-mp", type=Path, help="Path to label map YAML file (optional)")
-    parser.add_argument(
-        "--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class labels to exclude"
-    )
+    parser.add_argument("--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class labels to exclude")
     parser.add_argument(
         "--boundary_classes",
         "-bc",
@@ -1527,6 +1525,8 @@ def main_hbb2obb_optimize():
     print(f"HBB directory  : {hbb_dir}")
     print(f"Ground truth   : {gt_dir}")
     print(f"Output folder  : {output_folder}")
+    ratios = sorted({s.fragment_ratio for s in specs})
+    print(f"Fragment ratio : {', '.join(f'{r:g}' for r in ratios)}")
     print(f"Runs           : {len(specs)}")
     total_points = sum(len(s.grid) for s in specs)
     for spec in specs:
