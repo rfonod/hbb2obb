@@ -1,8 +1,10 @@
+import io
 import math
 import unittest
+from contextlib import redirect_stdout
+from itertools import takewhile
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
 
 from hbb2obb import analysis
 
@@ -221,6 +223,24 @@ class TestReport(unittest.TestCase):
 
     def test_a_group_with_no_boxes_reports_a_count_and_nothing_else(self):
         self.assertEqual(analysis.group_stats([]), {"boxes": 0})
+
+    def test_the_printed_tables_line_their_columns_up(self):
+        """Eight columns of unpadded numbers are a report nobody can read down."""
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            analysis.print_analysis(analysis.summarise(self.pairs()))
+        lines = buffer.getvalue().splitlines()
+
+        header = next(i for i, line in enumerate(lines) if line.strip().startswith("Boxes"))
+        rows = list(takewhile(lambda line: line.strip(), lines[header + 1 :]))
+        self.assertGreater(len(rows), 1)
+
+        # Every box count ends where the "Boxes" header ends, so the column reads down.
+        end = lines[header].index("Boxes") + len("Boxes")
+        for row in rows:
+            self.assertNotIn("|", row)
+            self.assertTrue(row[:end].rstrip().endswith(tuple("0123456789")), row)
+            self.assertEqual(len(row[:end]), end, row)
 
 
 if __name__ == "__main__":

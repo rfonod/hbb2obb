@@ -38,8 +38,6 @@ import numpy as np
 import tqdm
 from shapely.geometry import Polygon
 
-from hbb2obb.formats import looks_normalized
-
 from hbb2obb.evaluator import (
     HIGH_IOU_THRESHOLD,
     calculate_obb_iou,
@@ -49,6 +47,7 @@ from hbb2obb.evaluator import (
     orientation_error,
     parse_obb_file,
 )
+from hbb2obb.formats import looks_normalized
 
 # Degrees off 0 or 90 that still count as square to the image. Tight enough that only a box whose
 # corners are exactly axis-aligned falls inside it, which is what a detector emits.
@@ -505,12 +504,31 @@ def render_markdown(summary: dict, title: str = "Conversion breakdown") -> str:
 
 
 def print_analysis(summary: dict) -> None:
-    """The same report on the terminal, without the Markdown pipes."""
-    text = render_markdown(summary)
-    for line in text.splitlines():
-        if line.startswith("|---") or set(line.strip()) <= {"|", "-"} and line.strip():
+    """The same report on the terminal, the Markdown tables laid out in columns."""
+    block: List[List[str]] = []
+
+    def flush() -> None:
+        if not block:
+            return
+        widths = [max(len(row[i]) for row in block) for i in range(len(block[0]))]
+        for row in block:
+            cells = [row[0].ljust(widths[0])] + [c.rjust(w) for c, w in zip(row[1:], widths[1:])]
+            print("  " + "   ".join(cells).rstrip())
+        block.clear()
+
+    for line in render_markdown(summary).splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if set("".join(cells)) <= {"-"}:
+                continue
+            if block and len(cells) != len(block[0]):
+                flush()
+            block.append(cells)
             continue
-        print(line.replace("| ", "  ").replace(" |", "").rstrip())
+        flush()
+        print(line.rstrip())
+    flush()
 
 
 def plot_analysis(summary: dict, out_path: Path) -> None:
