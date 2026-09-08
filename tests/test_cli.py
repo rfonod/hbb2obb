@@ -118,15 +118,25 @@ def test_normalize_is_offered_by_the_conversion_command(monkeypatch, capsys):
     assert "--normalize" in out
 
 
-def test_the_breakdown_command_runs_over_the_sample_set(monkeypatch, capsys, tmp_path, gt_dir, pred_dir, hbb_dir,
-                                                        images_dir, label_map_path):
+def test_the_breakdown_command_runs_over_the_sample_set(
+    monkeypatch, capsys, tmp_path, gt_dir, pred_dir, hbb_dir, images_dir, label_map_path
+):
     """End to end on data/: the report reaches the terminal and the three files land in --out_dir."""
     monkeypatch.setattr(
         "sys.argv",
         [
-            "hbb2obb-analyze", str(gt_dir), str(pred_dir),
-            "-hd", str(hbb_dir), "-i", str(images_dir), "-mp", str(label_map_path),
-            "-o", str(tmp_path), "-nb",
+            "hbb2obb-analyze",
+            str(gt_dir),
+            str(pred_dir),
+            "-hd",
+            str(hbb_dir),
+            "-i",
+            str(images_dir),
+            "-mp",
+            str(label_map_path),
+            "-o",
+            str(tmp_path),
+            "-nb",
         ],
     )
     cli.main_hbb2obb_analyze()
