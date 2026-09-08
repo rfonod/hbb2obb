@@ -74,6 +74,7 @@ dev = [
 hbb2obb = "hbb2obb.cli:main_hbb2obb"
 hbb2obb-detect = "hbb2obb.cli:main_hbb2obb_detect"
 hbb2obb-eval = "hbb2obb.cli:main_hbb2obb_eval"
+hbb2obb-analyze = "hbb2obb.cli:main_hbb2obb_analyze"
 hbb2obb-convert = "hbb2obb.cli:main_hbb2obb_convert"
 hbb2obb-view = "hbb2obb.cli:main_hbb2obb_view"
 hbb2obb-optimize = "hbb2obb.cli:main_hbb2obb_optimize"

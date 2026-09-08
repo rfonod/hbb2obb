@@ -35,6 +35,7 @@ import yaml
 DEFAULT_IMGSZ = [640, 960, 1280]
 DEFAULT_SCALE_FACTORS = [-0.01, 0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]
 DEFAULT_OPENING_KERNELS = [0.15]
+DEFAULT_FRAGMENT_RATIO = 0.1
 
 RUN_CONFIG_NAME = "run_config.yaml"
 RESULTS_NAME = "results.yaml"
@@ -56,6 +57,7 @@ RUN_KEYS = {
     "imgsz",
     "scale_factors",
     "opening_kernels",
+    "fragment_ratio",
     "excluded_classes",
     "iou_threshold",
     "class_agnostic",
@@ -77,6 +79,9 @@ class RunSpec:
     imgsz: List[int] = field(default_factory=lambda: list(DEFAULT_IMGSZ))
     scale_factors: List[float] = field(default_factory=lambda: list(DEFAULT_SCALE_FACTORS))
     opening_kernels: List[float] = field(default_factory=lambda: list(DEFAULT_OPENING_KERNELS))
+    # Fixed rather than swept: it changes only the boxes whose mask came out in pieces, so a grid
+    # over it would spend most of its points measuring the same conversion twice.
+    fragment_ratio: float = DEFAULT_FRAGMENT_RATIO
     excluded_classes: List[int] = field(default_factory=list)
     iou_threshold: float = 0.1
     class_agnostic: bool = False
@@ -269,6 +274,7 @@ def sweep(
                         imgsz=imgsz,
                         scale_factors=sf,
                         opening_kernel_percentage=ok,
+                        fragment_ratio=spec.fragment_ratio,
                         model_kwargs=model_kwargs,
                         device=spec.device,
                     )
@@ -296,6 +302,7 @@ def sweep(
                 "imgsz": int(imgsz),
                 "scale_factor": float(sf),
                 "opening_kernel_percentage": float(ok),
+                "fragment_ratio": float(spec.fragment_ratio),
                 "avg_iou": float(eval_results["avg_iou"]),
                 "std_iou": float(eval_results["std_iou"]),
                 "sem_iou": float(eval_results["sem_iou"]),
@@ -350,6 +357,7 @@ def run_config_dict(spec: RunSpec, img_source: Path, gt_dir: Path, hbb_dir: Path
         "scale_factors": list(spec.scale_factors),
         "imgsz": list(spec.imgsz),
         "opening_kernels": list(spec.opening_kernels),
+        "fragment_ratio": spec.fragment_ratio,
         "excluded_classes": list(spec.excluded_classes),
         "iou_threshold": spec.iou_threshold,
         "class_agnostic": spec.class_agnostic,

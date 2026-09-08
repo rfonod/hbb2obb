@@ -280,6 +280,7 @@ def write_conversion_provenance(
     imgsz: int,
     scale_factors: Sequence[float],
     opening_kernel_percentage: float,
+    fragment_ratio: float,
     confidence_source: str = "conversion",
     model_kwargs: Optional[str] = None,
     device: Optional[str] = None,
@@ -300,6 +301,7 @@ def write_conversion_provenance(
     command += ["--imgsz", str(imgsz)]
     command += ["--scale_factors", *[str(s) for s in scale_factors]]
     command += ["--opening_kernel_percentage", str(opening_kernel_percentage)]
+    command += ["--fragment_ratio", str(fragment_ratio)]
     if confidence_source != "conversion":
         command += ["--confidence_source", confidence_source]
     if save_confidence:
@@ -328,6 +330,7 @@ def write_conversion_provenance(
         f"Inference image size     : {imgsz}",
         f"Scale factor(s)          : {' '.join(str(s) for s in scale_factors)}",
         f"Opening kernel           : {opening_kernel_percentage}",
+        f"Fragment ratio           : {fragment_ratio}",
         f"Confidence source        : {confidence_source}",
         f"Confidence written       : {confidence_placement(save_confidence, confidence_dir)}",
         f"Coordinates              : {coordinate_convention(normalize, precision)}",

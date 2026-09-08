@@ -31,12 +31,13 @@ SUPPORTED_SAM_MODELS = [
 
 # Shown at the end of `hbb2obb --help` so a new user discovers the rest of the toolkit.
 ENTRY_POINTS_EPILOG = (
-    "The hbb2obb toolkit ships six commands:\n"
+    "The hbb2obb toolkit ships seven commands:\n"
     "  hbb2obb           convert HBB annotations to OBBs by prompting SAM (this command)\n"
     "  hbb2obb-detect    detect HBBs with an Ultralytics model, for images that have none\n"
     "  hbb2obb-convert   convert annotations between YOLO, DOTA, Pascal VOC, COCO and LabelMe\n"
     "  hbb2obb-view      inspect HBB and OBB annotations over their images, interactively\n"
     "  hbb2obb-eval      score predicted OBBs against ground truth (IoU, orientation error, per class)\n"
+    "  hbb2obb-analyze   break that score down by orientation, size, edge, difficulty and class\n"
     "  hbb2obb-optimize  search hyperparameters, as one sweep or a whole benchmark\n\n"
     "Run any of them with --help for its own options, e.g. hbb2obb-detect --help."
 )
@@ -152,6 +153,14 @@ def main_hbb2obb():
         help="Fraction of the mask's smaller dimension used as the morphological kernel. Positive opens "
         "(removes thin protrusions), negative closes (fills holes and rejoins a fragmented mask before the "
         "largest contour is taken), 0 disables it.",
+    )
+    parser.add_argument(
+        "--fragment_ratio",
+        "-fr",
+        type=float,
+        default=0.1,
+        help="Minimum area, as a fraction of the largest mask piece's, for another piece to be fitted "
+        "together with it rather than discarded (default: 0.1). 0 fits the largest piece alone.",
     )
 
     # Visualization control arguments
@@ -325,6 +334,7 @@ def main_hbb2obb():
             imgsz=args.imgsz,
             scale_factors=args.scale_factors,
             opening_kernel_percentage=args.opening_kernel_percentage,
+            fragment_ratio=args.fragment_ratio,
             save_img=args.save_img,
             viz_dir=args.viz_dir if args.viz_dir else args.obb_dir,
             show_hbb=args.show_hbb,
@@ -395,6 +405,7 @@ def main_hbb2obb():
             imgsz=args.imgsz,
             scale_factors=args.scale_factors,
             opening_kernel_percentage=args.opening_kernel_percentage,
+            fragment_ratio=args.fragment_ratio,
             confidence_source=args.confidence_source,
             model_kwargs=args.model_kwargs,
             device=args.device,
@@ -1163,6 +1174,102 @@ def main_hbb2obb_eval():
     print_results(results, args.map_path)
 
 
+def main_hbb2obb_analyze():
+    """
+    Break a conversion's accuracy down by the properties of the box it was fitted to.
+    """
+
+    parser = argparse.ArgumentParser(
+        description="Break down OBB conversion accuracy by ground-truth orientation, size, edge, "
+        "difficulty and class, against the horizontal prompt as a baseline",
+        epilog=ENTRY_POINTS_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
+
+    parser.add_argument("gt_dir", type=Path, help="Directory containing ground truth OBB annotations")
+    parser.add_argument("pred_dir", type=Path, help="Directory containing predicted/converted OBB annotations")
+    parser.add_argument(
+        "--hbb_dir",
+        "-hd",
+        type=Path,
+        help="Directory of the HBB prompts, to score the conversion against emitting them unchanged "
+        "(default: gt_dir/../labels_hbb, if it exists)",
+    )
+    parser.add_argument(
+        "--img_source",
+        "-i",
+        type=Path,
+        help="Image or directory of images, for the frame-edge cut and for relative HBB coordinates",
+    )
+    parser.add_argument("--map_path", "-mp", type=Path, help="Path to label map YAML file (optional)")
+    parser.add_argument(
+        "--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class labels to exclude"
+    )
+    parser.add_argument(
+        "--boundary_classes",
+        "-bc",
+        type=int,
+        nargs='+',
+        help="Class labels the side-ratio table is restricted to (default: all)",
+    )
+    parser.add_argument(
+        "--iou_threshold", "-t", type=float, default=0.1, help="IoU threshold for considering a match (default: 0.1)"
+    )
+    parser.add_argument(
+        "--class_agnostic",
+        "-ca",
+        action="store_true",
+        help="Match boxes regardless of class labels",
+    )
+    parser.add_argument(
+        "--out_dir",
+        "-o",
+        type=Path,
+        help="Write analysis.md, analysis.yaml and analysis.png here as well as printing the report",
+    )
+    parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
+
+    args = parser.parse_args()
+
+    check_for_updates_once()
+
+    import yaml
+
+    from hbb2obb import analysis
+    from hbb2obb.formats import image_sizes
+    from hbb2obb.utils import load_label_map
+
+    hbb_dir = args.hbb_dir or _first_existing(args.gt_dir.parent, "labels_hbb")
+    sizes = image_sizes(args.img_source) if args.img_source else {}
+    if args.img_source and args.img_source.is_file():
+        sizes = {args.img_source.stem: sizes.get(args.img_source.stem)} if sizes else {}
+
+    pairs = analysis.collect_pairs(
+        gt_dir=args.gt_dir,
+        pred_dir=args.pred_dir,
+        hbb_dir=hbb_dir,
+        image_sizes=sizes,
+        excluded_classes=args.excluded_classes,
+        iou_threshold=args.iou_threshold,
+        class_agnostic=args.class_agnostic,
+        no_bar=args.no_bar,
+    )
+    if not pairs:
+        raise SystemExit("no boxes matched; check that gt_dir and pred_dir hold the same frames")
+
+    summary = analysis.summarise(pairs, load_label_map(args.map_path), args.boundary_classes)
+    analysis.print_analysis(summary)
+
+    if args.out_dir:
+        args.out_dir.mkdir(parents=True, exist_ok=True)
+        (args.out_dir / "analysis.md").write_text(analysis.render_markdown(summary), encoding="utf-8")
+        with open(args.out_dir / "analysis.yaml", "w", encoding="utf-8") as f:
+            yaml.safe_dump(analysis.to_yaml_safe(summary), f, sort_keys=False)
+        analysis.plot_analysis(summary, args.out_dir / "analysis.png")
+        print(f"\nWrote analysis.md, analysis.yaml and analysis.png to {args.out_dir}")
+
+
 def main_hbb2obb_optimize():
     """
     Search hyperparameters for the HBB to OBB conversion, one sweep or a whole benchmark.
@@ -1235,6 +1342,14 @@ def main_hbb2obb_optimize():
         "instead of open. Third grid axis: a run performs len(imgsz) x len(scale_factors) x "
         "len(opening_kernels) full SAM passes over the image set, so the defaults give 3 x 12 x 1 = 36, and "
         "three kernels instead of one triples that to 108",
+    )
+    grid_group.add_argument(
+        "--fragment_ratio",
+        "-fr",
+        type=float,
+        default=0.1,
+        help="Minimum area, as a fraction of the largest mask piece's, for another piece to be fitted "
+        "together with it (default: 0.1). Fixed for the whole sweep, not a grid axis.",
     )
 
     # Evaluation options
@@ -1346,6 +1461,7 @@ def main_hbb2obb_optimize():
                     if args.opening_kernels is not None
                     else list(optimizer.DEFAULT_OPENING_KERNELS)
                 ),
+                fragment_ratio=args.fragment_ratio,
                 excluded_classes=list(args.excluded_classes),
                 iou_threshold=args.iou_threshold,
                 class_agnostic=args.class_agnostic,

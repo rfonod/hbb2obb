@@ -116,3 +116,30 @@ def test_normalize_is_offered_by_the_conversion_command(monkeypatch, capsys):
     """`hbb2obb-detect` and `hbb2obb-convert` have had it; the conversion itself was the gap."""
     out = run_help(monkeypatch, capsys)
     assert "--normalize" in out
+
+
+def test_the_breakdown_command_runs_over_the_sample_set(monkeypatch, capsys, tmp_path, gt_dir, pred_dir, hbb_dir,
+                                                        images_dir, label_map_path):
+    """End to end on data/: the report reaches the terminal and the three files land in --out_dir."""
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hbb2obb-analyze", str(gt_dir), str(pred_dir),
+            "-hd", str(hbb_dir), "-i", str(images_dir), "-mp", str(label_map_path),
+            "-o", str(tmp_path), "-nb",
+        ],
+    )
+    cli.main_hbb2obb_analyze()
+    out = capsys.readouterr().out
+    assert "matched boxes" in out
+    assert "By ground-truth orientation" in out
+    assert "Against doing nothing" in out
+    for name in ("analysis.md", "analysis.yaml", "analysis.png"):
+        assert (tmp_path / name).is_file(), name
+
+
+def test_the_breakdown_finds_the_prompts_beside_the_ground_truth(monkeypatch, capsys, gt_dir, pred_dir):
+    """Without --hbb_dir it looks for labels_hbb next to the ground truth, as the conversion writes it."""
+    monkeypatch.setattr("sys.argv", ["hbb2obb-analyze", str(gt_dir), str(pred_dir), "-nb"])
+    cli.main_hbb2obb_analyze()
+    assert "Against doing nothing" in capsys.readouterr().out

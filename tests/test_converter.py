@@ -918,3 +918,104 @@ class TestSignedMorphology(unittest.TestCase):
             self.assertIsNone(converter.apply_morphological_opening(None, kernel))
             empty = np.zeros((10, 10), bool)
             self.assertFalse(converter.apply_morphological_opening(empty, kernel).any())
+
+
+class TestFragmentMerging(unittest.TestCase):
+    """A mask split by an occluder is fitted as one object, not as its larger half."""
+
+    def setUp(self):
+        self.img_width, self.img_height = 640, 480
+        # One HBB around a 200x60 vehicle lying along x
+        self.hbb_boxes = np.array([[0, 200, 200, 400, 260]], dtype=float)
+
+    def split_mask(self, gap_x0=290, gap_x1=310):
+        """A vehicle mask cut in two by a vertical occluder, inside the HBB."""
+        mask = np.zeros((self.img_height, self.img_width), dtype=bool)
+        mask[210:250, 210:390] = True
+        mask[:, gap_x0:gap_x1] = False
+        return [np.array([mask])]
+
+    def obb_width(self, row):
+        xs = np.asarray(row[1::2], dtype=float)
+        return float(xs.max() - xs.min())
+
+    def test_a_split_mask_is_fitted_as_one_object(self):
+        masks = self.split_mask()
+        merged, _, _, _ = create_obb_annotations_multi_model(
+            self.hbb_boxes, masks, opening_kernel_percentage=0.0, fragment_ratio=0.1
+        )
+        largest_only, _, _, _ = create_obb_annotations_multi_model(
+            self.hbb_boxes, masks, opening_kernel_percentage=0.0, fragment_ratio=0.0
+        )
+        self.assertGreater(
+            self.obb_width(merged[0]),
+            self.obb_width(largest_only[0]) + 20,
+            "merging the two pieces should span the whole vehicle, not one half",
+        )
+        self.assertGreater(self.obb_width(merged[0]), 160, "the merged box should span both pieces")
+
+    def test_a_piece_below_the_floor_is_left_out(self):
+        # A speck far from the vehicle: 4x4 px against a 180x40 body, well under a tenth of it.
+        mask = np.zeros((self.img_height, self.img_width), dtype=bool)
+        mask[210:250, 210:390] = True
+        mask[212:216, 380:384] = True
+        masks = [np.array([mask])]
+        with_floor, _, _, _ = create_obb_annotations_multi_model(
+            self.hbb_boxes, masks, opening_kernel_percentage=0.0, fragment_ratio=0.1
+        )
+        alone, _, _, _ = create_obb_annotations_multi_model(
+            self.hbb_boxes, masks, opening_kernel_percentage=0.0, fragment_ratio=0.0
+        )
+        np.testing.assert_array_equal(with_floor[0], alone[0])
+
+    def test_a_single_piece_writes_the_contour_it_always_did(self):
+        """The stored contour is untouched wherever nothing is merged, so polygon output cannot move."""
+        mask = np.zeros((self.img_height, self.img_width), dtype=bool)
+        mask[210:250, 210:390] = True
+        masks = [np.array([mask])]
+        merged_boxes, _, merged_contours, _ = create_obb_annotations_multi_model(
+            self.hbb_boxes, masks, opening_kernel_percentage=0.0, fragment_ratio=0.1
+        )
+        old_boxes, _, old_contours, _ = create_obb_annotations_multi_model(
+            self.hbb_boxes, masks, opening_kernel_percentage=0.0, fragment_ratio=0.0
+        )
+        np.testing.assert_array_equal(merged_boxes[0], old_boxes[0])
+        np.testing.assert_array_equal(merged_contours[0], old_contours[0])
+
+    def test_bridging_a_gap_does_not_raise_the_confidence(self):
+        """Rectangularity is the pieces' own area over the fitted rect, never the hull's."""
+        masks = self.split_mask()
+        _, _, contours, confidences = create_obb_annotations_multi_model(
+            self.hbb_boxes, masks, opening_kernel_percentage=0.0, fragment_ratio=0.1
+        )
+        hull_area = cv2.contourArea(contours[0])
+        rect = cv2.minAreaRect(contours[0])
+        self.assertLess(
+            confidences[0],
+            min(hull_area / (rect[1][0] * rect[1][1]), 1.0),
+            "the gap must count against the score, not be filled in by the hull",
+        )
+
+    def test_the_default_is_a_tenth_of_the_largest_piece(self):
+        self.assertEqual(converter.DEFAULT_FRAGMENT_RATIO, 0.1)
+
+
+class TestMergeFragmentContours(unittest.TestCase):
+    def contour(self, x0, y0, x1, y1):
+        return np.array([[[x0, y0]], [[x1, y0]], [[x1, y1]], [[x0, y1]]], dtype=np.int32)
+
+    def test_a_ratio_of_zero_keeps_the_largest_alone(self):
+        big, small = self.contour(0, 0, 100, 100), self.contour(200, 0, 250, 50)
+        self.assertEqual(len(converter.merge_fragment_contours([big, small], big, 0.0)), 1)
+
+    def test_the_largest_always_comes_first(self):
+        big, small = self.contour(0, 0, 100, 100), self.contour(200, 0, 250, 50)
+        parts = converter.merge_fragment_contours([small, big], big, 0.1)
+        np.testing.assert_array_equal(parts[0], big)
+        self.assertEqual(len(parts), 2)
+
+    def test_the_floor_is_relative_to_the_largest_piece(self):
+        big = self.contour(0, 0, 100, 100)  # 10000 px
+        small = self.contour(200, 0, 220, 20)  # 400 px, 4% of it
+        self.assertEqual(len(converter.merge_fragment_contours([big, small], big, 0.1)), 1)
+        self.assertEqual(len(converter.merge_fragment_contours([big, small], big, 0.03)), 2)
