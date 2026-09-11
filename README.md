@@ -339,23 +339,23 @@ Two of the seven tables it prints, from the 50-frame tuning set of
 ### By ground-truth orientation, interior and not difficult (3840 boxes)
 
                               Boxes   IoU (mean)   IoU (median)   IoU<0.75   IoU>=0.9   Angle p90   Angle mean
-  axis-aligned (<0.005 deg)    2694       0.9239         0.9335       0.4%      80.4%        0.00         0.15
-  rotated                      1146       0.8385         0.8572      12.2%      21.6%        5.23         2.89
-  off-axis 0 to 5 deg          2941       0.9215         0.9306       0.4%      77.5%        1.26         0.30
-  off-axis 5 to 15 deg          149       0.8500         0.8601       9.4%      23.5%        6.99         3.56
-  off-axis 15 to 30 deg         665       0.8200         0.8386      15.5%      13.2%        5.82         3.00
-  off-axis 30 to 45 deg          85       0.7976         0.8231      27.1%      14.1%        5.35         3.46
+  axis-aligned (<0.005 deg)    2694       0.9265         0.9351       0.2%      82.3%        0.00         0.14
+  rotated                      1146       0.8366         0.8554      13.5%      21.2%        5.35         2.82
+  off-axis 0 to 5 deg          2941       0.9239         0.9328       0.2%      79.2%        1.22         0.29
+  off-axis 5 to 15 deg          149       0.8479         0.8546       9.4%      25.5%        7.01         3.56
+  off-axis 15 to 30 deg         665       0.8171         0.8339      17.3%      12.3%        5.84         3.02
+  off-axis 30 to 45 deg          85       0.7966         0.8231      30.6%      12.9%        4.95         2.46
 
 ### Against doing nothing
 
                               Boxes   IoU as-is   IoU converted      Gain   Angle p90 as-is   Angle p90 converted
-  all                          4245      0.8617          0.8857   +0.0240             22.69                  3.46
-  axis-aligned (<0.005 deg)    2900      0.9816          0.9227   -0.0589              0.00                  0.00
-  rotated                      1345      0.6032          0.8059   +0.2028             27.77                 16.58
-  off-axis 0 to 5 deg          3159      0.9725          0.9204   -0.0521              0.00                  1.25
-  off-axis 5 to 15 deg          162      0.7034          0.8445   +0.1411             13.57                  8.22
-  off-axis 15 to 30 deg         820      0.5187          0.7774   +0.2587             25.68                 21.88
-  off-axis 30 to 45 deg         104      0.4464          0.7505   +0.3041             43.50                 19.51
+  all                          4245      0.8617          0.8868   +0.0251             22.69                  3.50
+  axis-aligned (<0.005 deg)    2900      0.9816          0.9252   -0.0564              0.00                  0.00
+  rotated                      1345      0.6032          0.8039   +0.2007             27.77                 16.00
+  off-axis 0 to 5 deg          3159      0.9725          0.9228   -0.0498              0.00                  1.20
+  off-axis 5 to 15 deg          162      0.7034          0.8421   +0.1387             13.57                  8.43
+  off-axis 15 to 30 deg         820      0.5187          0.7745   +0.2558             25.68                 21.31
+  off-axis 30 to 45 deg         104      0.4464          0.7495   +0.3031             43.50                 17.14
 ```
 
 `rotated` is every box off the axes and overlaps the bands below it, which answer a different
@@ -710,7 +710,8 @@ Enable it with `--save_confidence` (writes a 10th column to each output file). I
 
 ## Best Practices
 
-- For optimal results, combine multiple SAM models of comparable strength, e.g. `--sam_models sam_b sam_l sam2_b sam2.1_b`. Adding a weaker model is not free: under majority voting, two weak members can outvote a strong one.
+- Try one strong model before an ensemble. On the 495-grid-point study below, measured over 4,245 reference boxes, a single `sam_l` tied a five-model ensemble on mean IoU and beat it on the two scores that describe how a converted set fails, at 39% of the compute.
+- If you do ensemble, choose the vote threshold before the members. Masks are combined at `len // 2 + 1`, so an even-sized set must be unanimous and behaves as an intersection, which can only erode the extent the box is fitted to. A weak member in a pair holds a veto; in a triple it is outvoted and costs almost nothing.
 - Experiment with scale factors and inference resolutions based on your dataset.
 - Run `hbb2obb-optimize` to find the best settings for your data, and `--save_provenance` to record the ones you settled on.
 - Use class-agnostic evaluation when comparing against manually annotated ground truth with different class labels.
@@ -720,6 +721,36 @@ Enable it with `--save_confidence` (writes a 10th column to each output file). I
 
 - Results depend on the quality of the input HBBs and the SAM models used; poor annotations or weak segmentation lead to inaccurate OBBs.
 - Highly occluded or complex objects, where the HBB gives insufficient context, may not convert well.
+- The error from a bad prompt is one-sided. The mask is clipped to the scaled prompt, so a prompt smaller than the object truncates it permanently, while one that is too large is trimmed back by the mask. On the study below, moving the scale factor from 0.02 to -0.01, which is 6% of prompt area, costs 0.033 mean IoU and drops the share of boxes above IoU 0.9 from 61.5% to 15.7% without producing a single gross failure. Note that the factor moves each edge by that fraction of its own side, so it changes each dimension by twice the factor. When in doubt, prompt loose.
+- Small objects convert poorly. Below about 20 px across the shorter side there are too few pixels of width to fit an axis to.
+
+## Real-World Deployment: The Songdo Experiment
+
+HBB2OBB produced [**Songdo Vision OBB**](https://doi.org/10.5281/zenodo.15050578), the oriented-box
+release of the Songdo Vision v2 aerial vehicle dataset: **274,190 oriented boxes over 5,419 frames**
+of 4K drone imagery from Songdo, South Korea, one per horizontal box in the source dataset and
+carrying its class and identifier.
+
+The hyperparameters were selected by `hbb2obb-optimize` against 50 manually annotated frames that
+share no image with the converted set: 11 SAM model sets over 495 grid points, 30.2 h on one 24 GB
+card.
+
+| Songdo Vision OBB | |
+|---|---|
+| 🎯 Selected configuration | `sam_l` alone, `--imgsz 1024 -sf 0.02 -okp -0.1 -fr 0.1` |
+| 📐 Mean / median IoU vs. manual OBBs | 0.88679 / 0.91759 |
+| 📊 Share at IoU >= 0.75 / 0.90 | 92.06% / 61.51% |
+| 🧭 Orientation error, 90th percentile | 3.50 deg |
+| 🔁 Fallbacks to the source HBB | 0 of 4,245 on the validation frames, 0 of 274,190 in the release |
+
+Two findings from that search are worth carrying to another dataset. **Closing the mask beat both
+alternatives in 165 of 165 comparable cells**, on mean IoU and on the share above IoU 0.9 alike, so
+`-okp` is worth setting negative before it is worth tuning. And **majority-vote ensembling of SAM
+variants did not improve the conversion**: the objective could not separate five checkpoints from
+one, and the accuracy-against-compute front had two points on it rather than a curve.
+
+The full study, every grid point and the figures behind it ship with the dataset as
+`hbb2obb_benchmark/`, and re-run from the config beside them without this repository.
 
 ## Citation
 
