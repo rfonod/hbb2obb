@@ -701,6 +701,41 @@ def sniff_format(path: Path) -> Optional[str]:
     return "yolo"
 
 
+def formats_present(path: Path) -> List[str]:
+    """
+    Every format holding label files under a directory, in ``ALL_FORMATS`` order.
+
+    A published set usually ships the same boxes more than once: the canonical YOLO files, a DOTA
+    copy beside them, a COCO record at the subset root. This names all of them, so that a reader
+    can say which one it picked and offer the rest. For a single file it is the one format that
+    file is, and for anything unreadable it is empty.
+    """
+    if path.is_dir():
+        return [fmt for fmt in ALL_FORMATS if label_files(path, fmt)]
+    fmt = sniff_format(path)
+    return [fmt] if fmt else []
+
+
+def coco_beside(directory: Path) -> Optional[Path]:
+    """
+    The COCO file that goes with a label directory, if one is there.
+
+    ``labels_<name>/`` pairs with ``coco_annotations_<name>.json`` one level up and a plain
+    ``labels/`` with ``coco_annotations.json``, which is the layout both the sample data and
+    Songdo Vision OBB use. A COCO record covers a whole subset, so it never sits inside the
+    per-frame directory and is not something ``formats_present`` can find there.
+    """
+    if not directory.is_dir():
+        return None
+    if directory.name == "labels":
+        candidate = directory.parent / "coco_annotations.json"
+    elif directory.name.startswith("labels_"):
+        candidate = directory.parent / f"coco_annotations_{directory.name[len('labels_') :]}.json"
+    else:
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def detect_format(path: Path) -> str:
     """
     Guess the format of a label file or of a directory of them, raising if it cannot.
@@ -709,16 +744,12 @@ def detect_format(path: Path) -> str:
     wherever a set ships its canonical files beside derived ones: the derived formats are rounded
     and cannot carry a confidence, so reading them by alphabetical accident loses information.
     """
+    present = formats_present(path)
+    if present:
+        return present[0]
     if path.is_dir():
-        for fmt in ALL_FORMATS:
-            if label_files(path, fmt):
-                return fmt
         raise ValueError(f"No label files found in {path}")
-
-    fmt = sniff_format(path)
-    if fmt is None:
-        raise ValueError(f"Cannot tell the format of {path}")
-    return fmt
+    raise ValueError(f"Cannot tell the format of {path}")
 
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")

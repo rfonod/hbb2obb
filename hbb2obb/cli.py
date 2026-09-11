@@ -983,8 +983,9 @@ def main_hbb2obb_view():
         description="View HBB and OBB annotations over their images: pan, zoom, and step through frames",
         epilog=(
             "Keys: q/Esc quit, n/p or arrows change frame, wheel or +/- zoom, f fit, 1 100%%, "
-            "h HBBs, l labels, d difficult, c confidence, g polygons, x comparison, s save. "
-            "Drag with the left mouse button to pan."
+            "h HBBs, l labels, d difficult, c confidence, g polygons, t/y read the OBBs/HBBs from "
+            "the next format the set ships, x comparison, s save. Drag with the left mouse button "
+            "to pan."
         ),
     )
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
@@ -1033,7 +1034,8 @@ def main_hbb2obb_view():
         "--confidence_dir",
         "-cd",
         type=Path,
-        help="Side-car directory of confidence scores, for labels that carry no confidence column "
+        help="Side-car directory of confidence scores, for labels that carry no confidence column. "
+        "Read whether or not --show_confidence is given, so that the c key has something to show "
         "(default: img_source/../labels_confidence)",
     )
     parser.add_argument("--window", type=str, default="1600x900", help="Window size as WxH (default: 1600x900)")
@@ -1056,11 +1058,21 @@ def main_hbb2obb_view():
     polygon_dir = args.polygon_dir or _first_existing(root.parent, "labels_polygon")
     names = resolve_names(args.map_path, obb_dir or root, [])
 
-    from hbb2obb.formats import image_sizes
+    from hbb2obb.formats import image_sizes, read_confidences
 
     sizes = image_sizes(args.img_source)
-    obb = viewer.load_annotations(obb_dir, args.obb_format, names, sizes)
-    hbb = viewer.load_annotations(hbb_dir, args.hbb_format, names, sizes)
+
+    # Read the side-car scores whether or not --show_confidence was given: the c key toggles the
+    # colouring at any time, and a release that keeps its label files standard has no score in
+    # them to toggle. Nothing is drawn differently until the key is pressed, so this only costs
+    # one directory read.
+    confidence_dir = args.confidence_dir or _first_existing(root.parent, "labels_confidence")
+    scores = read_confidences(confidence_dir) if confidence_dir else {}
+
+    obb_source = viewer.AnnotationSource(obb_dir, names, sizes, args.obb_format, scores)
+    hbb_source = viewer.AnnotationSource(hbb_dir, names, sizes, args.hbb_format)
+    obb = obb_source.read()
+    hbb = hbb_source.read()
     compared = viewer.load_annotations(args.compare, None, names, sizes)
 
     # An explicitly requested format that turns up nothing is a mistake worth reporting: without
@@ -1072,27 +1084,22 @@ def main_hbb2obb_view():
             raise SystemExit(f"No {fmt} {label} annotations {where}")
     if not obb and not hbb:
         raise SystemExit(f"No annotations found next to {args.img_source}; pass --obb_dir or --hbb_dir")
-    if args.show_confidence and not any(b.score is not None for boxes in obb.values() for b in boxes):
-        # A release that keeps its label files standard puts the scores in their own directory, so
-        # look there before telling the reader the annotations have none.
-        from hbb2obb.formats import read_confidences
 
-        confidence_dir = args.confidence_dir or _first_existing(root.parent, "labels_confidence")
-        scores = read_confidences(confidence_dir) if confidence_dir else {}
-        attached = 0
-        for stem, boxes in obb.items():
-            row = scores.get(stem)
-            if row is not None and len(row) == len(boxes):
-                for box, score in zip(boxes, row):
-                    box.score = score
-                attached += len(boxes)
-        if attached:
-            print(f"Read {attached} confidence score(s) from {confidence_dir}")
-        else:
-            print(
-                f"Warning: no confidence scores in {obb_dir}; re-run hbb2obb with --save_confidence, "
-                "or point --confidence_dir at a side-car directory"
-            )
+    # Say which of a set's readings is on screen. A set that ships three of the same boxes is
+    # ordinary, and the derived ones are rounded and carry no confidence, so the choice matters.
+    for label, source in (("OBB", obb_source), ("HBB", hbb_source)):
+        if source.fmt is None:
+            continue
+        others = [f for f in source.formats if f != source.fmt]
+        also = f", also {', '.join(others)}" if others else ""
+        print(f"{label}: {source.fmt} from {source.path}{also}")
+    if obb_source.attached:
+        print(f"Read {obb_source.attached} confidence score(s) from {confidence_dir}")
+    elif args.show_confidence and not any(b.score is not None for boxes in obb.values() for b in boxes):
+        print(
+            f"Warning: no confidence scores in {obb_dir}; re-run hbb2obb with --save_confidence, "
+            "or point --confidence_dir at a side-car directory"
+        )
     if not names:
         seen = [b.cls for boxes in obb.values() for b in boxes]
         names = [f"{i}" for i in range(1 + max(seen, default=-1))]
@@ -1103,7 +1110,9 @@ def main_hbb2obb_view():
             "obb": obb.get(path.stem, []),
             "hbb": hbb.get(path.stem, []),
             "cmp": compared.get(path.stem, []),
-            "polygons": viewer.read_polygons(polygon_dir / f"{path.stem}.txt") if polygon_dir else [],
+            "polygons": viewer.read_polygons(polygon_dir / f"{path.stem}.txt", *sizes.get(path.stem, (0, 0)))
+            if polygon_dir
+            else [],
         }
         for path in paths
     ]
@@ -1114,7 +1123,15 @@ def main_hbb2obb_view():
 
     if args.out_dir is None and not args.crops:
         width, _, height = args.window.partition("x")
-        view = viewer.Viewer(frames, names, int(width), int(height), args.show_hbb, args.show_labels)
+        view = viewer.Viewer(
+            frames,
+            names,
+            int(width),
+            int(height),
+            args.show_hbb,
+            args.show_labels,
+            sources={"obb": obb_source, "hbb": hbb_source},
+        )
         view.show_confidence = args.show_confidence
         if args.frame:
             view.idx = [f["path"].stem for f in frames].index(args.frame)

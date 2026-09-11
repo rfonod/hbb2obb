@@ -99,6 +99,54 @@ def test_read_polygons_of_a_missing_file_is_empty(tmp_path):
     assert viewer.read_polygons(tmp_path / "nope.txt") == []
 
 
+def test_read_polygons_denormalizes_a_relative_side_car(tmp_path):
+    """
+    `hbb2obb --normalize` writes the contours relative too, as Songdo Vision OBB ships them.
+
+    Read as pixels they collapse into the top-left corner of a 4K frame and the polygon layer
+    looks switched off, which is what it did until this.
+    """
+    path = tmp_path / "a.txt"
+    path.write_text("0 0.25 0.5 0.5 0.5 0.5 0.25\n", encoding="utf-8")
+
+    scaled = viewer.read_polygons(path, 800, 600)
+    assert scaled[0].tolist() == [[200, 300], [400, 300], [400, 150]]
+
+    assert viewer.read_polygons(path)[0].tolist() == [[0.25, 0.5], [0.5, 0.5], [0.5, 0.25]]
+
+
+def test_read_polygons_leaves_absolute_coordinates_alone(tmp_path):
+    path = tmp_path / "a.txt"
+    path.write_text("0 10 20 300 20 300 40\n", encoding="utf-8")
+    assert viewer.read_polygons(path, 800, 600)[0].tolist() == [[10, 20], [300, 20], [300, 40]]
+
+
+def test_one_contour_past_the_edge_does_not_flip_a_relative_file(tmp_path):
+    """A fitted contour may run off the frame, as 0.82% of the release's boxes do."""
+    path = tmp_path / "a.txt"
+    path.write_text("0 0.25 0.5 0.5 0.5 0.5 0.25\n0 -0.004 0.5 0.5 0.5 0.5 1.008\n", encoding="utf-8")
+    assert viewer.read_polygons(path, 800, 600)[0].tolist() == [[200, 300], [400, 300], [400, 150]]
+
+
+# ------------------------------------------------------------------------------- confidence side-car
+def test_attach_confidences_fills_only_the_scoreless_boxes():
+    annotations = {
+        "f1": [Box(0, formats.rect(0, 0, 1, 1)), Box(0, formats.rect(0, 0, 1, 1), score=0.5)],
+        "f2": [Box(0, formats.rect(0, 0, 1, 1))],
+    }
+    assert viewer.attach_confidences(annotations, {"f1": [0.9, 0.1], "f2": [0.3]}) == 2
+    assert [b.score for b in annotations["f1"]] == [0.9, 0.5]
+    assert annotations["f2"][0].score == 0.3
+
+
+def test_attach_confidences_skips_a_row_that_does_not_line_up():
+    """Row alignment is the whole contract of the side-car; a short row means the wrong file."""
+    annotations = {"f1": [Box(0, formats.rect(0, 0, 1, 1)), Box(0, formats.rect(0, 0, 1, 1))]}
+    assert viewer.attach_confidences(annotations, {"f1": [0.9]}) == 0
+    assert viewer.attach_confidences(annotations, {"other": [0.9, 0.8]}) == 0
+    assert [b.score for b in annotations["f1"]] == [None, None]
+
+
 def test_contact_sheet_pages_and_selection(tmp_path):
     img = np.full((400, 600, 3), 128, np.uint8)
     boxes = [Box(0, formats.rect(10 + 5 * i, 10, 50 + 5 * i, 50)) for i in range(45)]
@@ -166,7 +214,7 @@ def test_viewer_view_produces_a_window_sized_canvas(tmp_path):
     canvas = v.view()
     assert canvas.shape == (240, 320, 3)
     assert v.frame["path"].stem in v.status()
-    assert "q quit" in v.status()
+    assert "q quit" in viewer.Viewer.KEYS  # the legend has a line of the bar to itself
 
 
 def test_viewer_zoom_is_clamped_to_fit_and_to_16x(tmp_path):
@@ -331,9 +379,138 @@ def test_the_key_legend_names_every_layer_toggle(tmp_path):
     import re
 
     source = inspect.getsource(viewer)
-    toggles = set(re.findall(r'key == ord\("(\w)"\):\n\s+self\.(?:show_\w+|compare_mode)', source))
+    toggles = set(re.findall(r'key == ord\("(\w)"\):\n\s+self\.(?:show_\w+|compare_mode|cycle_format)', source))
     listed = set(re.findall(r"(?:^|\s)(\w)\s", viewer.Viewer.KEYS))
 
     assert "o" in toggles, "the OBB layer needs a key of its own"
     assert toggles <= listed, f"toggles handled but not listed: {sorted(toggles - listed)}"
     assert "o obb" in viewer.Viewer.KEYS and "h hbb" in viewer.Viewer.KEYS
+    assert {"t", "y"} <= toggles, "switching the source format of a layer is a key like any other"
+
+
+# ------------------------------------------------------------------------------ several formats
+@pytest.fixture
+def multi_format(tmp_path, monkeypatch):
+    """
+    A set laid out the way Songdo Vision OBB ships one.
+
+    `labels/` holds the canonical YOLO files and a DOTA copy of the same boxes, the COCO record
+    sits beside it because it covers the whole subset, and the confidences are in a side-car
+    directory because none of those three formats may carry an extra column here.
+    """
+    monkeypatch.setenv("HBB2OBB_DISABLE_UPDATE_CHECK", "1")
+    (tmp_path / "images").mkdir()
+    cv2.imwrite(str(tmp_path / "images" / "img1.jpg"), np.zeros((60, 80, 3), np.uint8))
+    (tmp_path / "names.txt").write_text("\n".join(NAMES) + "\n", encoding="utf-8")
+
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    (labels / "img1.txt").write_text("0 10 10 30 12 28 32 8 30\n", encoding="utf-8")
+    frames, _, _ = formats.read_set(labels, "yolo", NAMES, {"img1": (80, 60)})
+    formats.write_set(frames, labels, "dota", NAMES, "obb")
+    formats.write_set(frames, tmp_path, "coco", NAMES, "obb", coco_name="coco_annotations.json")
+
+    (tmp_path / "labels_confidence").mkdir()
+    (tmp_path / "labels_confidence" / "img1.txt").write_text("0.42\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_a_source_lists_every_format_the_set_ships(multi_format):
+    source = viewer.AnnotationSource(multi_format / "labels", NAMES, {"img1": (80, 60)})
+    assert source.formats == ["yolo", "dota", "coco"]
+    assert source.fmt == "yolo", "the canonical file wins: the derived ones are rounded"
+    assert source.path == multi_format / "labels"
+
+
+def test_a_source_advances_through_its_formats_and_wraps(multi_format):
+    source = viewer.AnnotationSource(multi_format / "labels", NAMES, {"img1": (80, 60)})
+    assert source.next_format == "dota"
+    assert [source.advance() for _ in range(4)] == ["dota", "coco", "yolo", "dota"]
+    assert source.path == multi_format / "labels"
+
+    source.advance()  # the COCO record is a file one level up, not a file in the directory
+    assert source.path == multi_format / "coco_annotations.json"
+
+
+def test_a_single_format_set_has_nothing_to_switch_to(tmp_path):
+    (tmp_path / "img1.txt").write_text("0 10 10 30 12 28 32 8 30\n", encoding="utf-8")
+    source = viewer.AnnotationSource(tmp_path, NAMES, {})
+    assert source.formats == ["yolo"]
+    assert source.next_format is None and source.advance() is None
+
+
+def test_every_format_of_a_set_gets_the_side_car_scores(multi_format):
+    """DOTA cannot carry a confidence at all, so the switch has to re-attach them."""
+    scores = formats.read_confidences(multi_format / "labels_confidence")
+    source = viewer.AnnotationSource(multi_format / "labels", NAMES, {"img1": (80, 60)}, scores=scores)
+
+    for expected in ("yolo", "dota", "coco"):
+        assert source.fmt == expected
+        assert [b.score for b in source.read()["img1"]] == [0.42]
+        source.advance()
+
+
+def test_switching_a_format_re_reads_every_frame(multi_format):
+    """A switch that only took effect on the frame on screen would silently mix two readings."""
+    sizes = {"img1": (80, 60)}
+    source = viewer.AnnotationSource(multi_format / "labels", NAMES, sizes)
+    frames = [
+        {
+            "path": multi_format / "images" / "img1.jpg",
+            "obb": source.read()["img1"],
+            "hbb": [],
+            "cmp": [],
+            "polygons": [],
+        }
+        for _ in range(2)
+    ]
+    v = viewer.Viewer(frames, NAMES, win_w=320, win_h=240, sources={"obb": source})
+
+    assert v.cycle_format("obb") == "dota"
+    assert all(len(f["obb"]) == 1 for f in v.frames)
+    assert v.frame["obb"] is v.frames[0]["obb"]
+    assert v.cycle_format("hbb") is None, "a layer with no source of its own cannot be switched"
+
+
+def test_the_status_bar_names_the_format_and_the_key_that_changes_it(multi_format, tmp_path):
+    sizes = {"img1": (80, 60)}
+    source = viewer.AnnotationSource(multi_format / "labels", NAMES, sizes)
+    frame = {
+        "path": multi_format / "images" / "img1.jpg",
+        "obb": source.read()["img1"],
+        "hbb": [],
+        "cmp": [],
+        "polygons": [],
+    }
+    v = viewer.Viewer([frame], NAMES, win_w=320, win_h=240, sources={"obb": source})
+
+    assert "OBB yolo (t: dota)" in v.status()
+    v.cycle_format("obb")
+    assert "OBB dota (t: coco)" in v.status()
+
+
+def test_a_set_with_one_format_says_so_without_offering_a_key(tmp_path):
+    cv2.imwrite(str(tmp_path / "f0.jpg"), np.zeros((60, 80, 3), np.uint8))
+    (tmp_path / "img1.txt").write_text("0 10 10 30 12 28 32 8 30\n", encoding="utf-8")
+    source = viewer.AnnotationSource(tmp_path, NAMES, {})
+    frame = {"path": tmp_path / "f0.jpg", "obb": [], "hbb": [], "cmp": [], "polygons": []}
+    v = viewer.Viewer([frame], NAMES, win_w=320, win_h=240, sources={"obb": source})
+    assert "OBB yolo" in v.status() and "(t:" not in v.status()
+
+
+def test_view_reads_the_side_car_without_being_asked_to_show_it(multi_format, monkeypatch, tmp_path, capsys):
+    """
+    `c` toggles the colouring at any time, so the scores have to be there before it is pressed.
+
+    Gating the side-car read on --show_confidence is what made the key do nothing at all on a
+    release whose label files stay standard, which is every release this tool produces.
+    """
+    assert run_view(monkeypatch, multi_format / "images", "-o", tmp_path / "out") == 0
+    assert "Read 1 confidence score(s)" in capsys.readouterr().out
+
+
+def test_view_names_the_format_it_picked_and_the_others_it_found(multi_format, monkeypatch, tmp_path, capsys):
+    assert run_view(monkeypatch, multi_format / "images", "-o", tmp_path / "out") == 0
+    out = capsys.readouterr().out
+    assert "OBB: yolo from" in out
+    assert "also dota, coco" in out

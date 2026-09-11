@@ -12,13 +12,16 @@ a Pascal VOC directory or a COCO file, and renders from any two of them can be c
 The window pans and zooms, which is what looking at 4K aerial frames actually requires: a vehicle
 is forty pixels across and its orientation is not judgeable at fit-to-screen scale.
 
+Where a set ships several readings of the same boxes, the status bar names the one on screen and
+``t`` and ``y`` swap the oriented and horizontal layers to the next one.
+
 Run it through ``hbb2obb-view``; see ``hbb2obb-view --help`` for the arguments.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -48,16 +51,19 @@ def confidence_color(score: float) -> Tuple[int, int, int]:
 
 
 # ---------------------------------------------------------------------------------------- loading
-def read_polygons(path: Path) -> List[np.ndarray]:
+def read_polygons(path: Path, width: int = 0, height: int = 0) -> List[np.ndarray]:
     """
     Read a polygon side-car written by ``hbb2obb --save_polygon``.
 
     Each line is ``class x1 y1 ... xN yN [confidence]`` with a variable number of corners, so these
-    do not go through the box readers.
+    do not go through the box readers. ``hbb2obb --normalize`` writes these relative to the frame
+    exactly as it writes the labels, so the frame size is needed to read them back: without it a
+    released set's contours all collapse into the top-left pixel and the layer looks empty. The
+    whole file decides, as in ``read_yolo``, so one contour running past an edge cannot flip it.
     """
     if not path.is_file():
         return []
-    polygons = []
+    rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         fields = line.split()
         if len(fields) < 7:
@@ -65,8 +71,11 @@ def read_polygons(path: Path) -> List[np.ndarray]:
         coords = [float(v) for v in fields[1:]]
         if len(coords) % 2:  # a trailing confidence column
             coords = coords[:-1]
-        polygons.append(np.array(coords, dtype=float).reshape(-1, 2))
-    return polygons
+        rows.append(coords)
+
+    if width and height and formats.looks_normalized([v for row in rows for v in row]):
+        rows = [[v * (width if i % 2 == 0 else height) for i, v in enumerate(row)] for row in rows]
+    return [np.array(row, dtype=float).reshape(-1, 2) for row in rows]
 
 
 def image_paths(img_source: Path) -> List[Path]:
@@ -88,6 +97,106 @@ def load_annotations(source: Optional[Path], fmt: Optional[str], names: Optional
         print(f"Warning: could not read {source}: {e}")
         return {}
     return {frame.stem: frame.boxes for frame in frames}
+
+
+def attach_confidences(annotations: dict, scores: Dict[str, List[float]]) -> int:
+    """
+    Give every scoreless box the side-car score of its row. Returns how many were attached.
+
+    Only YOLO's tenth column and COCO's ``score`` can carry a confidence, so a release whose label
+    files have to stay strictly standard keeps the scores in a directory of their own, row-aligned
+    with the labels. Reading that is the only way such a set can be coloured by confidence at all,
+    and it has to happen again after a format switch, since the DOTA copy of the same boxes cannot
+    carry the score either. A row that does not line up with its frame is skipped rather than
+    guessed at.
+    """
+    attached = 0
+    for stem, boxes in annotations.items():
+        row = scores.get(stem)
+        if row is None or len(row) != len(boxes):
+            continue
+        for box, score in zip(boxes, row):
+            if box.score is None:
+                box.score = score
+                attached += 1
+    return attached
+
+
+class AnnotationSource:
+    """
+    One annotation set, every format it could be read from, and which one is in use.
+
+    A published set usually ships the same boxes more than once, and the copies are not
+    interchangeable: the derived formats are rounded and carry no confidence, which is why the
+    canonical YOLO files win by default. The alternatives are kept here so that ``t`` and ``y``
+    can swap between them without restarting, and each reading is cached, since re-reading four
+    thousand DOTA files to flick back and compare is a visible pause.
+
+    The COCO record is the odd one out: it covers a whole subset, so it sits beside the label
+    directory rather than in it, and ``formats.coco_beside`` is what finds it.
+    """
+
+    def __init__(
+        self,
+        directory: Optional[Path],
+        names: Optional[Sequence[str]],
+        sizes: dict,
+        fmt: Optional[str] = None,
+        scores: Optional[Dict[str, List[float]]] = None,
+    ):
+        self.directory = directory
+        self.names = names
+        self.sizes = sizes
+        self.scores = scores or {}
+        self.attached = 0
+
+        self.options: List[Tuple[str, Path]] = []
+        if directory is not None and directory.exists():
+            self.options = [(f, directory) for f in formats.formats_present(directory)]
+            coco = formats.coco_beside(directory)
+            if coco is not None:
+                self.options.append(("coco", coco))
+            self.options.sort(key=lambda option: formats.ALL_FORMATS.index(option[0]))
+
+        self.fmt = fmt or (self.options[0][0] if self.options else None)
+        self.index = next((i for i, (f, _) in enumerate(self.options) if f == self.fmt), 0)
+        self._cache: Dict[str, dict] = {}
+
+    @property
+    def formats(self) -> List[str]:
+        """The formats this set can be read from, in the order ``t`` cycles them."""
+        return [f for f, _ in self.options]
+
+    @property
+    def path(self) -> Optional[Path]:
+        """Where the current format is read from, which for COCO is a file beside the directory."""
+        for fmt, path in self.options:
+            if fmt == self.fmt:
+                return path
+        return self.directory
+
+    @property
+    def next_format(self) -> Optional[str]:
+        """The format ``t`` would switch to, or None when there is nothing to switch to."""
+        if len(self.options) < 2:
+            return None
+        return self.options[(self.index + 1) % len(self.options)][0]
+
+    def read(self) -> dict:
+        """The current format's boxes, indexed by frame stem, with the side-car scores attached."""
+        if self.fmt not in self._cache:
+            loaded = load_annotations(self.path, self.fmt, self.names, self.sizes)
+            self.attached = attach_confidences(loaded, self.scores)
+            self._cache[self.fmt] = loaded
+        return self._cache[self.fmt]
+
+    def advance(self) -> Optional[str]:
+        """Move to the next format and return it, or None when this set has only the one."""
+        if len(self.options) < 2:
+            return None
+        self.index = (self.index + 1) % len(self.options)
+        self.fmt = self.options[self.index][0]
+        return self.fmt
 
 
 # ---------------------------------------------------------------------------------------- drawing
@@ -224,11 +333,16 @@ class Viewer:
     that a long review session needs no menus.
     """
 
-    KEYS = "q quit  n/p frame  +/- zoom  f fit  o obb  h hbb  l labels  d difficult  c conf  g poly  x cmp  s save"
+    KEYS = (
+        "q quit  n/p frame  +/- zoom  f fit  o obb  h hbb  l labels  d difficult  "
+        "c conf  g poly  t obb-fmt  y hbb-fmt  x cmp  s save"
+    )
+    BAR_H = 52  # two lines: what is on screen, then the keys that change it
 
-    def __init__(self, frames, names, win_w=1600, win_h=900, show_hbb=True, show_labels=True):
+    def __init__(self, frames, names, win_w=1600, win_h=900, show_hbb=True, show_labels=True, sources=None):
         self.frames = frames  # list of dicts: path, obb, hbb, cmp, polygons
         self.names = names
+        self.sources = dict(sources or {})  # 'obb' / 'hbb' -> AnnotationSource, for t and y
         self.win_w, self.win_h = win_w, win_h
         self.idx = 0
         self.show_hbb = show_hbb
@@ -329,8 +443,12 @@ class Viewer:
         pad = np.full((self.win_h, self.win_w, 3), 20, np.uint8)
         vh, vw = min(vis.shape[0], self.win_h), min(vis.shape[1], self.win_w)
         pad[:vh, :vw] = vis[:vh, :vw]
-        cv2.rectangle(pad, (0, 0), (self.win_w, 30), (20, 20, 20), -1)
+        cv2.rectangle(pad, (0, 0), (self.win_w, self.BAR_H), (20, 20, 20), -1)
+        # Two lines rather than one: naming the source format of each layer costs a third of the
+        # bar, and the single line it used to share with the key legend runs past the right edge
+        # of any window narrower than about 1300 px.
         cv2.putText(pad, self.status(), (10, 21), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (240, 240, 240), 1, cv2.LINE_AA)
+        cv2.putText(pad, self.KEYS, (10, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (170, 170, 170), 1, cv2.LINE_AA)
         self.canvas = pad
         return pad
 
@@ -342,8 +460,42 @@ class Viewer:
             extra += f" vs {len(self.frame['cmp'])} compared"
         return (
             f"[{self.idx + 1}/{len(self.frames)}] {self.frame['path'].stem}   "
-            f"{len(obb)} objects{extra}   zoom {self.zoom * 100:.0f}%   {self.KEYS}"
+            f"{len(obb)} objects{extra}   {self.sources_status()}zoom {self.zoom * 100:.0f}%"
         )
+
+    def sources_status(self) -> str:
+        """
+        Which format each layer is being read from, and the key that swaps it.
+
+        The same boxes read from a set's DOTA copy are the rounded ones and carry no confidence,
+        so which file the window is showing is not a detail: without this the viewer picks one
+        silently and a reader has no way to tell which.
+        """
+        parts = []
+        for kind, key in (("obb", "t"), ("hbb", "y")):
+            source = self.sources.get(kind)
+            if source is None or source.fmt is None:
+                continue
+            nxt = source.next_format
+            parts.append(f"{kind.upper()} {source.fmt}" + (f" ({key}: {nxt})" if nxt else ""))
+        return "   ".join(parts) + "   " if parts else ""
+
+    def cycle_format(self, kind: str) -> Optional[str]:
+        """
+        Read this layer from the next format the set ships, and return it.
+
+        Every frame is re-read, not just the one on screen: the point of the key is to compare
+        two readings of the same boxes, and a switch that only took effect on the current frame
+        would silently mix them.
+        """
+        source = self.sources.get(kind)
+        if source is None or source.advance() is None:
+            return None
+        annotations = source.read()
+        for frame in self.frames:
+            frame[kind] = annotations.get(frame["path"].stem, [])
+        self.frame = self.frames[self.idx]
+        return source.fmt
 
     # ------------------------------------------------------------------ input
     def on_mouse(self, event, x, y, flags, _):
@@ -407,6 +559,10 @@ class Viewer:
                 self.show_confidence = not self.show_confidence
             elif key == ord("g"):
                 self.show_polygons = not self.show_polygons
+            elif key == ord("t"):
+                self.cycle_format("obb")
+            elif key == ord("y"):
+                self.cycle_format("hbb")
             elif key == ord("x"):
                 self.compare_mode = (self.compare_mode + 1) % 3
             elif key == ord("s"):

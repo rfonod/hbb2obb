@@ -238,6 +238,36 @@ def test_detect_format_raises_on_an_unreadable_directory(tmp_path):
         formats.detect_format(tmp_path)
 
 
+def test_formats_present_lists_every_reading_of_a_set(tmp_path):
+    """A set that ships its canonical files beside derived ones has several, and all of them count."""
+    (tmp_path / "a.txt").write_text("0 10 10 30 10 30 20 10 20\n", encoding="utf-8")
+    (tmp_path / "a.dota").write_text("imagesource:drone\n10 10 30 10 30 20 10 20 Car 0\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("nothing here", encoding="utf-8")
+
+    assert formats.formats_present(tmp_path) == ["yolo", "dota"]
+    assert formats.detect_format(tmp_path) == "yolo", "the first one present is still the detected one"
+    assert formats.formats_present(tmp_path / "a.dota") == ["dota"]
+    assert formats.formats_present(tmp_path / "notes.md") == []
+
+
+def test_formats_present_of_a_directory_with_nothing_in_it(tmp_path):
+    assert formats.formats_present(tmp_path) == []
+
+
+def test_coco_beside_pairs_a_label_directory_with_its_record(tmp_path):
+    """A COCO file covers a whole subset, so it sits beside the directory rather than in it."""
+    (tmp_path / "labels").mkdir()
+    (tmp_path / "labels_obb").mkdir()
+    (tmp_path / "images").mkdir()
+    assert formats.coco_beside(tmp_path / "labels") is None, "nothing there to pair with yet"
+
+    (tmp_path / "coco_annotations.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "coco_annotations_obb.json").write_text("{}", encoding="utf-8")
+    assert formats.coco_beside(tmp_path / "labels") == tmp_path / "coco_annotations.json"
+    assert formats.coco_beside(tmp_path / "labels_obb") == tmp_path / "coco_annotations_obb.json"
+    assert formats.coco_beside(tmp_path / "images") is None, "only a labels directory pairs"
+
+
 def test_image_size_reads_the_header(tmp_path):
     cv2 = pytest.importorskip("cv2")
     img = np.zeros((37, 53, 3), np.uint8)
