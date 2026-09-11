@@ -328,6 +328,95 @@ def read_coco(path: Path, names: Optional[Sequence[str]] = None) -> Tuple[List[F
     return list(frames.values()), (list(names) if names is not None else coco_names)
 
 
+@dataclass
+class CocoIdentity:
+    """
+    Identifiers and record metadata lifted from an existing COCO file, to be re-used by a new one.
+
+    A converted set is usually a derivative: one box per box of some source annotation, in the same
+    order. ``write_coco`` numbers images and annotations ``1..N``, which breaks the join back to
+    that source, and it has no way to know what record the output belongs to, so it writes an empty
+    ``info`` and ``licenses``. Reading them off the source file is what keeps a derived release
+    traceable, and the match is positional: box *k* of a frame is the same object in both files.
+
+    ``info`` is read here for a caller that wants it, but ``write_coco`` does not carry it into the
+    output: it describes the record being written, and a derivative is not its source.
+    """
+
+    image_ids: Dict[str, int]
+    annotation_ids: Dict[str, List[int]]
+    classes: Dict[str, List[Optional[str]]]
+    info: dict = field(default_factory=dict)
+    licenses: list = field(default_factory=list)
+    supercategory: Optional[str] = None
+
+
+def read_coco_identity(path: Path) -> CocoIdentity:
+    """
+    Read a COCO file for its identifiers and record metadata, not its geometry.
+
+    Annotations are grouped by frame in the order the file lists them, which is the order
+    ``write_coco`` writes and the order a one-box-per-box conversion preserves.
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    category_names = {c["id"]: c.get("name", str(c["id"])) for c in data.get("categories", [])}
+    supercategories = {c.get("supercategory") for c in data.get("categories", [])} - {None}
+
+    stems: Dict[int, str] = {}
+    image_ids: Dict[str, int] = {}
+    for img in data.get("images", []):
+        stem = Path(img["file_name"]).stem
+        stems[img["id"]] = stem
+        image_ids[stem] = img["id"]
+
+    annotation_ids: Dict[str, List[int]] = {stem: [] for stem in image_ids}
+    classes: Dict[str, List[Optional[str]]] = {stem: [] for stem in image_ids}
+    for ann in data.get("annotations", []):
+        stem = stems.get(ann.get("image_id"))
+        if stem is None:
+            continue
+        annotation_ids[stem].append(ann["id"])
+        classes[stem].append(category_names.get(ann.get("category_id")))
+
+    return CocoIdentity(
+        image_ids=image_ids,
+        annotation_ids=annotation_ids,
+        classes=classes,
+        info=data.get("info") or {},
+        licenses=data.get("licenses") or [],
+        supercategory=supercategories.pop() if len(supercategories) == 1 else None,
+    )
+
+
+def check_coco_identity(identity: CocoIdentity, frames: Sequence[FrameAnnotations], names: Sequence[str]) -> List[str]:
+    """
+    Whether ``identity`` really describes ``frames``, row for row. Returns the problems found.
+
+    Checked before anything is written, because a positional map applied to the wrong rows produces
+    a file that is wrong in a way nothing downstream can detect.
+    """
+    problems = []
+    missing = [f.stem for f in frames if f.stem not in identity.image_ids]
+    if missing:
+        problems.append(f"{len(missing)} frame(s) are not in the source file, e.g. {missing[:3]}")
+
+    for frame in frames:
+        if frame.stem not in identity.image_ids:
+            continue
+        ids = identity.annotation_ids[frame.stem]
+        if len(ids) != len(frame.boxes):
+            problems.append(f"{frame.stem}: {len(frame.boxes)} box(es) here against {len(ids)} in the source")
+            continue
+        for row, (box, name) in enumerate(zip(frame.boxes, identity.classes[frame.stem])):
+            if name is not None and 0 <= box.cls < len(names) and names[box.cls] != name:
+                problems.append(f"{frame.stem} row {row}: class {names[box.cls]!r} here against {name!r}")
+
+    used = [i for f in frames if f.stem in identity.annotation_ids for i in identity.annotation_ids[f.stem]]
+    if len(set(used)) != len(used):
+        problems.append("the source file repeats an annotation id across the frames being written")
+    return problems
+
+
 def read_labelme(
     path: Path, names: Optional[Sequence[str]] = None, discovered: Optional[List[str]] = None
 ) -> Tuple[List[Box], int, int, List[str]]:
@@ -457,6 +546,7 @@ def write_coco(
     info: Optional[dict] = None,
     licenses: Optional[list] = None,
     supercategory: Optional[str] = None,
+    identity: Optional[CocoIdentity] = None,
 ) -> None:
     """
     Write a single COCO instance file for the whole set.
@@ -464,16 +554,31 @@ def write_coco(
     Oriented boxes carry the quad in ``segmentation`` and its envelope in ``bbox``; horizontal ones
     carry ``bbox`` alone. Annotation ids are assigned in frame then row order, so an OBB file and an
     HBB file written from the same boxes can be joined by id.
+
+    Pass ``identity`` to take the ids, and the ``licenses`` and ``supercategory``, from the source
+    file the boxes were derived from instead; the map is positional and is verified here before
+    anything is written, and an explicit ``licenses`` or ``supercategory`` still wins. ``info``
+    describes this record rather than the source one, so it is never carried in: pass it, or leave
+    it empty.
     """
+    if identity is not None:
+        problems = check_coco_identity(identity, frames, names)
+        if problems:
+            joined = "\n  ".join(problems)
+            raise ValueError(f"the source COCO file does not describe these boxes row for row:\n  {joined}")
+        licenses = identity.licenses if licenses is None else licenses
+        supercategory = identity.supercategory if supercategory is None else supercategory
+
     images, annotations = [], []
-    for image_id, frame in enumerate(sorted(frames, key=lambda f: f.stem), start=1):
+    for position, frame in enumerate(sorted(frames, key=lambda f: f.stem), start=1):
+        image_id = identity.image_ids[frame.stem] if identity is not None else position
         images.append(
             {"id": image_id, "file_name": f"{frame.stem}{image_ext}", "width": frame.width, "height": frame.height}
         )
-        for box in frame.boxes:
+        for row, box in enumerate(frame.boxes):
             x0, y0, x1, y1 = _round_xyxy(box)
             ann = {
-                "id": len(annotations) + 1,
+                "id": identity.annotation_ids[frame.stem][row] if identity is not None else len(annotations) + 1,
                 "image_id": image_id,
                 "category_id": box.cls + 1,
                 "bbox": [x0, y0, x1 - x0, y1 - y0],
@@ -922,6 +1027,7 @@ def write_set(
     dota_ext: str = DOTA_EXT,
     image_ext: str = ".jpg",
     coco_name: Optional[str] = None,
+    identity: Optional[CocoIdentity] = None,
     **kwargs,
 ) -> List[Path]:
     """Write a whole annotation set in one format. Returns the paths written."""
@@ -934,7 +1040,7 @@ def write_set(
     if fmt == "coco":
         dest.mkdir(parents=True, exist_ok=True)
         path = dest / (coco_name or f"coco_annotations_{kind}.json")
-        write_coco(path, frames, names, obb, image_ext=image_ext, **kwargs)
+        write_coco(path, frames, names, obb, image_ext=image_ext, identity=identity, **kwargs)
         return [path]
 
     dest.mkdir(parents=True, exist_ok=True)

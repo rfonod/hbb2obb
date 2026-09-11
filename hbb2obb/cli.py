@@ -7,6 +7,7 @@ Command-line interface for HBB2OBB.
 """
 
 import argparse
+import json
 from pathlib import Path
 
 from hbb2obb import __version__
@@ -758,6 +759,27 @@ def main_hbb2obb_convert():
         "labels_<name> directory, which is how --verify pairs the two.",
     )
     parser.add_argument(
+        "--coco_from",
+        metavar="FILE",
+        type=Path,
+        help=(
+            "Take the image and annotation ids, and the 'licenses' and 'supercategory' fields, "
+            "from this existing COCO file instead of numbering from 1. Use it when the boxes are "
+            "derived one for one from that file, so the two can still be joined by id. The match "
+            "is by frame name and row order and is checked before anything is written. 'info' is "
+            "not carried over, since it describes the record being written: see --coco_info."
+        ),
+    )
+    parser.add_argument(
+        "--coco_info",
+        metavar="FILE",
+        type=Path,
+        help=(
+            "JSON file holding the COCO 'info' object for the written record, e.g. its description, "
+            "version, contributor and DOI. Written verbatim; omitted, 'info' stays empty."
+        ),
+    )
+    parser.add_argument(
         "--verify",
         action="store_true",
         help="Check that every format found under the source encodes the same boxes, and write nothing",
@@ -799,6 +821,10 @@ def main_hbb2obb_convert():
         f"from {args.source} ({src_format})"
     )
 
+    for flag, value in (("--coco_from", args.coco_from), ("--coco_info", args.coco_info)):
+        if value and "coco" not in args.to:
+            raise SystemExit(f"{flag} is read only when COCO is among the output formats (--to coco)")
+
     if args.confidence_dir and args.difficult_from != "confidence":
         raise SystemExit(
             "--confidence_dir is read only by --difficult_from confidence, which is what turns the "
@@ -828,12 +854,37 @@ def main_hbb2obb_convert():
         flagged, _, _ = formats.read_set(source, args.difficult_from, names, sizes, default_size)
         print(f"Carried {formats.apply_difficult(frames, flagged)} difficult flag(s) from {args.difficult_from}")
 
+    identity = formats.read_coco_identity(args.coco_from) if args.coco_from else None
+    if identity is not None:
+        problems = formats.check_coco_identity(identity, frames, names)
+        if problems:
+            raise SystemExit(
+                f"--coco_from {args.coco_from} does not describe these boxes row for row:\n  "
+                + "\n  ".join(problems[:10])
+                + (f"\n  ... and {len(problems) - 10} more" if len(problems) > 10 else "")
+            )
+        print(f"Carrying ids, licenses and supercategory over from {args.coco_from}")
+
+    coco_info = None
+    if args.coco_info:
+        try:
+            coco_info = json.loads(args.coco_info.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"--coco_info {args.coco_info}: {exc}") from exc
+        if not isinstance(coco_info, dict):
+            raise SystemExit(f"--coco_info {args.coco_info}: expected a JSON object, got {type(coco_info).__name__}")
+
     for fmt in args.to:
         extra = {}
         if fmt == "voc":
             extra = {"database": args.voc_database}
-        elif fmt == "coco" and args.coco_name:
-            extra = {"coco_name": args.coco_name}
+        elif fmt == "coco":
+            if args.coco_name:
+                extra["coco_name"] = args.coco_name
+            if identity is not None:
+                extra["identity"] = identity
+            if coco_info is not None:
+                extra["info"] = coco_info
         written = formats.write_set(
             frames,
             out_dir,

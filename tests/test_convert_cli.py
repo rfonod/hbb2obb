@@ -481,3 +481,162 @@ def test_verify_skips_the_sidecar_directories(monkeypatch, capsys, release_subse
     out = capsys.readouterr().out
     assert "labels_confidence" not in out
     assert "labels_polygon" not in out
+
+
+@pytest.fixture
+def source_coco(tmp_path):
+    """A source COCO whose ids are neither contiguous nor per-subset, as a real derivative's are."""
+    path = tmp_path / "source.json"
+    path.write_text(
+        json.dumps(
+            {
+                "info": {"description": "the source record", "year": 2020},
+                "licenses": [{"id": 1, "name": "CC BY 4.0", "url": "https://example.invalid/by"}],
+                "images": [
+                    {"id": 27, "file_name": "img2.jpg", "width": 100, "height": 200},
+                    {"id": 4, "file_name": "img1.jpg", "width": 100, "height": 200},
+                ],
+                "categories": [{"id": 1, "name": "Car", "supercategory": "vehicle"}],
+                "annotations": [
+                    {"id": 900, "image_id": 4, "category_id": 1, "bbox": [10, 10, 40, 40]},
+                    {"id": 1000001, "image_id": 4, "category_id": 1, "bbox": [50, 50, 10, 10]},
+                    {"id": 7, "image_id": 27, "category_id": 1, "bbox": [10, 10, 40, 40]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.fixture
+def two_frame_yolo(tmp_path):
+    """Two frames whose rows line up with source_coco, one of them carrying two boxes."""
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    (labels / "img1.txt").write_text("0 30 10 50 30 30 50 10 30\n0 70 50 80 60 70 70 60 60\n", encoding="utf-8")
+    (labels / "img2.txt").write_text("0 30 10 50 30 30 50 10 30\n", encoding="utf-8")
+    (tmp_path / "names.txt").write_text("Car\n", encoding="utf-8")
+    return labels
+
+
+def test_coco_ids_are_taken_from_the_source_when_asked(monkeypatch, tmp_path, two_frame_yolo, source_coco):
+    # A derivative is one box per box in row order, so the join back to its source is by id. Without
+    # this the ids are 1..N and that join is gone.
+    out = tmp_path / "out"
+    assert (
+        run(monkeypatch, two_frame_yolo, "--to", "coco", "-o", out, "-iw", 100, "-ih", 200, "--coco_from", source_coco)
+        == 0
+    )
+    written = json.loads((out / "coco_annotations_obb.json").read_text(encoding="utf-8"))
+    assert [i["id"] for i in written["images"]] == [4, 27]
+    assert [(a["id"], a["image_id"]) for a in written["annotations"]] == [(900, 4), (1000001, 4), (7, 27)]
+
+
+def test_the_licenses_and_supercategory_come_along_but_the_info_does_not(
+    monkeypatch, tmp_path, two_frame_yolo, source_coco
+):
+    # info describes the record being written and a derivative is not its source, so carrying it
+    # over would put the source dataset's own description inside the derived file.
+    out = tmp_path / "out"
+    assert (
+        run(monkeypatch, two_frame_yolo, "--to", "coco", "-o", out, "-iw", 100, "-ih", 200, "--coco_from", source_coco)
+        == 0
+    )
+    written = json.loads((out / "coco_annotations_obb.json").read_text(encoding="utf-8"))
+    assert written["licenses"] == [{"id": 1, "name": "CC BY 4.0", "url": "https://example.invalid/by"}]
+    assert all(c["supercategory"] == "vehicle" for c in written["categories"])
+    assert written["info"] == {}
+
+
+def test_the_info_block_is_written_verbatim(monkeypatch, tmp_path, two_frame_yolo):
+    out = tmp_path / "out"
+    info = tmp_path / "info.json"
+    info.write_text(json.dumps({"description": "the derived record", "version": "1.0"}), encoding="utf-8")
+    assert run(monkeypatch, two_frame_yolo, "--to", "coco", "-o", out, "-iw", 100, "-ih", 200, "--coco_info", info) == 0
+    written = json.loads((out / "coco_annotations_obb.json").read_text(encoding="utf-8"))
+    assert written["info"] == {"description": "the derived record", "version": "1.0"}
+
+
+def test_a_source_that_does_not_line_up_row_for_row_is_refused(monkeypatch, tmp_path, two_frame_yolo, source_coco):
+    # A positional map applied to the wrong rows writes a file that is wrong in a way nothing
+    # downstream can detect, so the mismatch has to stop the write rather than be repaired.
+    (two_frame_yolo / "img2.txt").write_text("0 30 10 50 30 30 50 10 30\n0 70 50 80 60 70 70 60 60\n", encoding="utf-8")
+    out = tmp_path / "out"
+    code = run(
+        monkeypatch, two_frame_yolo, "--to", "coco", "-o", out, "-iw", 100, "-ih", 200, "--coco_from", source_coco
+    )
+    assert code != 0
+    assert "2 box(es) here against 1 in the source" in str(code)
+    assert not (out / "coco_annotations_obb.json").exists()
+
+
+def test_a_frame_the_source_never_heard_of_is_refused(monkeypatch, tmp_path, two_frame_yolo, source_coco):
+    (two_frame_yolo / "img9.txt").write_text("0 30 10 50 30 30 50 10 30\n", encoding="utf-8")
+    code = run(
+        monkeypatch,
+        two_frame_yolo,
+        "--to",
+        "coco",
+        "-o",
+        tmp_path / "out",
+        "-iw",
+        100,
+        "-ih",
+        200,
+        "--coco_from",
+        source_coco,
+    )
+    assert code != 0
+    assert "not in the source file" in str(code)
+
+
+def test_a_class_that_disagrees_with_the_source_is_refused(monkeypatch, tmp_path, two_frame_yolo, source_coco):
+    # Same box count, different object: the row counts alone would let this through.
+    (tmp_path / "names.txt").write_text("Bus\n", encoding="utf-8")
+    code = run(
+        monkeypatch,
+        two_frame_yolo,
+        "--to",
+        "coco",
+        "-o",
+        tmp_path / "out",
+        "-iw",
+        100,
+        "-ih",
+        200,
+        "--coco_from",
+        source_coco,
+    )
+    assert code != 0
+    assert "'Bus' here against 'Car'" in str(code)
+
+
+def test_the_identity_flags_are_refused_when_no_coco_is_written(monkeypatch, tmp_path, two_frame_yolo, source_coco):
+    code = run(
+        monkeypatch,
+        two_frame_yolo,
+        "--to",
+        "dota",
+        "-o",
+        tmp_path / "out",
+        "-iw",
+        100,
+        "-ih",
+        200,
+        "--coco_from",
+        source_coco,
+    )
+    assert code != 0
+    assert "--coco_from is read only when COCO is among the output formats" in str(code)
+
+
+def test_without_a_source_the_numbering_is_what_it_always_was(monkeypatch, tmp_path, two_frame_yolo):
+    # Pins the default: ids 1..N in frame then row order, so an OBB file and an HBB file written
+    # from the same boxes still join by id without anything being passed.
+    out = tmp_path / "out"
+    assert run(monkeypatch, two_frame_yolo, "--to", "coco", "-o", out, "-iw", 100, "-ih", 200) == 0
+    written = json.loads((out / "coco_annotations_obb.json").read_text(encoding="utf-8"))
+    assert [i["id"] for i in written["images"]] == [1, 2]
+    assert [(a["id"], a["image_id"]) for a in written["annotations"]] == [(1, 1), (2, 1), (3, 2)]
+    assert written["info"] == {} and written["licenses"] == []

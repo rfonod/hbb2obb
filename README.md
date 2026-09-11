@@ -471,6 +471,10 @@ hbb2obb-convert /path/to/instances.json --from coco --to yolo -o /path/to/labels
 
 # Check that every format present under a directory encodes the same boxes
 hbb2obb-convert /path/to/dataset --verify -mp label_map.yaml
+
+# A COCO file for a derived release: keep the source's ids so the two still join, and name the record
+hbb2obb-convert /path/to/labels_obb --to coco --images /path/to/images \
+    --coco_from /path/to/source/coco_annotations.json --coco_info /path/to/info.json
 ```
 
 <details>
@@ -481,6 +485,8 @@ hbb2obb-convert /path/to/dataset --verify -mp label_map.yaml
 Only DOTA and Pascal VOC can express a per-box `difficult` flag, so writing either one from YOLO or COCO resets it; `--difficult_from dota` carries the flags across. `--difficult_from confidence` instead derives the flag from the conversion score, flagging everything below `--difficult_below` (fallback boxes score 0.0, so they are always flagged); the scores come from a trailing column on the source labels, or from `--confidence_dir` when the labels are standard ones with the scores in a side-car. The scores themselves stay out of the output. Only YOLO and COCO can carry a confidence, so DOTA and Pascal VOC drop it. Image dimensions come from `--images`, or from `--img_width` / `--img_height`, and are needed to denormalize relative YOLO coordinates. LabelMe stores class names rather than ids, so pass `-mp` when round-tripping through it to pin the ids.
 
 A COCO file is named `coco_annotations_<kind>.json` unless `--coco_name` says otherwise, which is also how `--verify` pairs one with its directory: `labels_<name>/` goes with `coco_annotations_<name>.json` beside it. Where a directory holds the canonical YOLO files next to derived ones, `--from` is detected as `yolo`.
+
+COCO images and annotations are numbered `1..N` in frame then row order, so an OBB file and an HBB file written from the same boxes join by id. `--coco_from` takes those ids from an existing COCO file instead, which is what a derived release needs: one box per box of some source annotation means the two can still be joined, and a renumbering throws that away. The match is by frame name and row order and is refused unless the frame sets, the per-frame box counts and every row's class agree, so a file written against the wrong source is not possible. It also carries the source's `licenses` and the categories' `supercategory`. It does **not** carry `info`, which describes the record being written: give that with `--coco_info`, a JSON file written verbatim.
 
 </details>
 
