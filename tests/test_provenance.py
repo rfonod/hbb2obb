@@ -7,6 +7,7 @@ quietly left out.
 """
 
 import hashlib
+import shlex
 
 from hbb2obb import provenance
 
@@ -126,6 +127,30 @@ def test_dirtiness_is_measured_over_the_package_not_the_whole_repository(tmp_pat
     assert provenance.git_state(repo, package)["dirty"] == 1
 
 
+def test_an_install_inside_another_repository_is_not_that_repositorys_commit(tmp_path):
+    """
+    A wheel installed into a virtual environment inside someone else's checkout sits in their
+    work tree, ignored. Asking git from the package directory then answers for their repository,
+    and the record named its HEAD as hbb2obb's commit and said the code matched it.
+    """
+    import subprocess
+
+    repo = tmp_path / "other_project"
+    package = repo / ".venv" / "lib" / "site-packages" / "hbb2obb"
+    package.mkdir(parents=True)
+    (package / "converter.py").write_text("x = 1\n")
+    (repo / ".gitignore").write_text(".venv/\n")
+    (repo / "main.py").write_text("print('their code')\n")
+    for args in (["init", "-q"], ["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "i"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    assert provenance.git_state(package_root=package) == {"commit": None, "describe": None, "dirty": None}
+
+    # The same copy, untracked but not ignored, is not theirs either.
+    (repo / ".gitignore").write_text("")
+    assert provenance.git_state(package_root=package)["commit"] is None
+
+
 def test_header_survives_an_installed_wheel(monkeypatch):
     """A PyPI install has no checkout, and that is not an error: the digest still identifies it."""
     monkeypatch.setattr(provenance, "git_state", lambda: {"commit": None, "describe": None, "dirty": None})
@@ -159,7 +184,9 @@ def test_conversion_provenance_records_the_command_and_the_checkpoints(tmp_path)
 
     assert status == 0
     text = out.read_text()
-    assert "hbb2obb " + str(tmp_path / "images") in text
+    command = shlex.split(recorded_command(out))
+    assert command[0] == "hbb2obb"
+    assert command[1] == str(tmp_path / "images")
     assert "--sam_models sam_b --imgsz 1280 --scale_factors 0.05" in text
     assert "--confidence_source combined" in text
     assert hashlib.sha256(b"weights").hexdigest() in text
@@ -244,6 +271,32 @@ def test_detection_provenance_hashes_the_detector(tmp_path):
     assert hashlib.sha256(b"detector").hexdigest() in text
     assert "--imgsz 1920" in text
     assert "Classes kept             : 0 1 2 3" in text
+
+
+def test_detection_provenance_records_every_option_that_changes_the_files(tmp_path):
+    weights = tmp_path / "geotrax.pt"
+    weights.write_bytes(b"detector")
+    out = tmp_path / "PROVENANCE_hbb.txt"
+    provenance.write_detection_provenance(
+        out=out,
+        img_source=tmp_path / "images",
+        hbb_dir=None,
+        model="geotrax",
+        weights=weights,
+        imgsz=1920,
+        conf=0.25,
+        iou=0.45,
+        class_map="2=0,5=1",
+        max_det=300,
+        save_confidence=False,
+    )
+    command = recorded_command(out)
+    for option in ("--class_map 2=0,5=1", "--max_det 300", "--no_confidence"):
+        assert option in command
+    text = out.read_text()
+    assert "Class map                : 2=0,5=1" in text
+    assert "Max detections per image : 300" in text
+    assert "Confidence written       : not written" in text
 
 
 def test_benchmark_provenance_embeds_the_config_and_hashes_both_inputs(tmp_path):

@@ -68,9 +68,8 @@ def test_registered_detector_downloads_into_the_models_directory(monkeypatch, tm
         return destination
 
     monkeypatch.setattr(detector, "download_weights", fake_download)
-    monkeypatch.setattr(detector, "WEIGHTS_DIR", tmp_path / "models")
 
-    resolved = detector.resolve_weights("geotrax")
+    resolved = detector.resolve_weights("geotrax", tmp_path / "models")
     assert resolved == tmp_path / "models" / "geotrax_hbb_yolov8s_1920_v1.pt"
     assert asked["url"].startswith("https://huggingface.co/rfonod/geo-trax/resolve/main/")
 
@@ -89,18 +88,34 @@ def test_a_hugging_face_reference_becomes_a_resolve_url(monkeypatch, tmp_path):
         return destination
 
     monkeypatch.setattr(detector, "download_weights", fake_download)
-    monkeypatch.setattr(detector, "WEIGHTS_DIR", tmp_path / "models")
 
-    resolved = detector.resolve_weights("someone/custom_hbb.pt")
+    resolved = detector.resolve_weights("someone/detectors/custom_hbb.pt", tmp_path / "models")
     assert resolved == tmp_path / "models" / "custom_hbb.pt"
-    assert asked["url"] == "https://huggingface.co/someone/resolve/main/custom_hbb.pt"
+    assert asked["url"] == "https://huggingface.co/someone/detectors/resolve/main/custom_hbb.pt"
 
 
 def test_an_ultralytics_name_is_left_for_ultralytics_to_fetch(monkeypatch, tmp_path):
     """No download here: passing the path to YOLO() is what triggers Ultralytics' own fetch."""
-    monkeypatch.setattr(detector, "WEIGHTS_DIR", tmp_path / "models")
     monkeypatch.setattr(detector, "download_weights", lambda *_: pytest.fail("should not download"))
-    assert detector.resolve_weights("yolo11s") == tmp_path / "models" / "yolo11s.pt"
+    assert detector.resolve_weights("yolo11s", tmp_path / "models") == tmp_path / "models" / "yolo11s.pt"
+
+
+def test_the_environment_moves_every_checkpoint_and_an_argument_beats_it(monkeypatch, tmp_path):
+    """One variable relocates detector weights and SAM checkpoints alike; --models_dir wins over it."""
+    from hbb2obb.converter import sam_checkpoint_path
+    from hbb2obb.weights import DEFAULT_MODELS_DIR, MODELS_DIR_ENV
+
+    monkeypatch.setattr(detector, "download_weights", lambda _url, destination: destination)
+    monkeypatch.delenv(MODELS_DIR_ENV, raising=False)
+    assert detector.resolve_weights("geotrax").parent == DEFAULT_MODELS_DIR
+    assert sam_checkpoint_path("sam_l") == DEFAULT_MODELS_DIR / "sam_l.pt"
+
+    monkeypatch.setenv(MODELS_DIR_ENV, str(tmp_path / "shared"))
+    assert detector.resolve_weights("geotrax").parent == tmp_path / "shared"
+    assert sam_checkpoint_path("sam_l") == tmp_path / "shared" / "sam_l.pt"
+
+    assert detector.resolve_weights("geotrax", tmp_path / "given").parent == tmp_path / "given"
+    assert sam_checkpoint_path("sam_l", tmp_path / "given") == tmp_path / "given" / "sam_l.pt"
 
 
 def test_an_existing_checkpoint_is_not_downloaded_again(tmp_path):
@@ -274,6 +289,71 @@ def test_detect_cli_writes_labels_beside_the_images(images, monkeypatch, fake_de
     written = (images / "labels_hbb" / "img1.txt").read_text(encoding="utf-8").splitlines()
     assert written == ["0 100 100 40 20 0.9000", "2 300 200 60 30 0.4000"]
     assert "Wrote 2 boxes" in capsys.readouterr().out
+
+
+def test_detect_cli_loads_the_detector_from_the_models_directory_given(images, monkeypatch, fake_detector):
+    asked = []
+    monkeypatch.setattr(
+        detector, "load_detector", lambda model, models_dir=None: asked.append(models_dir) or fake_detector
+    )
+    assert run(monkeypatch, images / "images", "--models_dir", images / "weights") == 0
+    assert asked == [images / "weights"]
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--class_map", "2=1,0=0", "--max_det", "50", "--no_confidence", "--precision", "1"],
+        # Predictor arguments passed through, one of them shadowing a named flag's default and
+        # one holding a comma inside brackets: the replay must not also emit --conf or --classes.
+        ["--model_kwargs", "conf=0.5,classes=[0, 2],agnostic_nms=True,augment=false", "--max_det", "50"],
+    ],
+    ids=["named flags", "passed-through kwargs"],
+)
+def test_the_recorded_command_reproduces_the_labels(images, monkeypatch, fake_detector, options):
+    """
+    Every option that changes the files must reach the reproducing command. Re-run it into a
+    second directory: the labels must match byte for byte and the detector must have been asked
+    the same thing, which is what catches an option like --max_det that the fake model ignores.
+    """
+    import shlex
+
+    from hbb2obb.cli import DETECTION_PROVENANCE_NAME
+
+    first = images / "labels_hbb"
+    assert run(monkeypatch, images / "images", *options, "--save_provenance") == 0
+
+    text = (images / DETECTION_PROVENANCE_NAME).read_text(encoding="utf-8").splitlines()
+    command = shlex.split(text[text.index(next(ln for ln in text if ln.startswith("Command that"))) + 2])
+    assert command[0] == "hbb2obb-detect"
+    second = images / "again" / "labels_hbb"
+    command[command.index("--hbb_dir") + 1] = str(second)
+    assert run(monkeypatch, *command[1:]) == 0
+
+    assert fake_detector.calls[0] == fake_detector.calls[1]
+    assert (second / "img1.txt").read_bytes() == (first / "img1.txt").read_bytes()
+
+
+def test_passed_through_kwargs_reach_the_predictor_as_python_values(images, monkeypatch, fake_detector):
+    options = ["--model_kwargs", "conf=0.5,classes=[0, 2],agnostic_nms=True,half=false,device=cpu"]
+    assert run(monkeypatch, images / "images", *options) == 0
+    asked = fake_detector.calls[0]
+    assert asked["conf"] == 0.5 and asked["classes"] == [0, 2] and asked["device"] == "cpu"
+    assert asked["agnostic_nms"] is True and asked["half"] is False
+    assert asked["iou"] == detector.SUPPORTED_DETECTORS["geotrax"].iou  # the rest keep the detector's own
+
+
+def test_a_predictor_argument_given_twice_is_refused(images, monkeypatch, fake_detector):
+    """--conf 0.3 with conf=0.5 in --model_kwargs would record one and run the other."""
+    result = run(monkeypatch, images / "images", "--conf", "0.3", "--model_kwargs", "conf=0.5")
+    assert result == 2 and not fake_detector.calls
+    with pytest.raises(ValueError, match="conf"):
+        detector.predictor_settings("geotrax", conf=0.3, model_kwargs={"conf": 0.5})
+
+
+def test_malformed_model_kwargs_stop_the_run(images, monkeypatch, fake_detector):
+    assert run(monkeypatch, images / "images", "--model_kwargs", "conf=0.5,iou") == 2
+    assert not fake_detector.calls
 
 
 def test_detect_cli_refuses_to_replace_existing_labels(images, monkeypatch, fake_detector):

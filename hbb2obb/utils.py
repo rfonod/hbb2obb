@@ -5,12 +5,13 @@
 Utility functions for HBB to OBB conversion and evaluation
 """
 
+import ast
 import platform
 import sys
 from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
-from typing import Union
+from typing import List, Union
 
 import numpy as np
 import psutil
@@ -165,36 +166,57 @@ def get_hbb_dir(img_path: Path, hbb_dir: Path = None, must_exist: bool = True) -
 
 def process_ultralytics_kwargs(kwargs_string: str) -> dict:
     """
-    Parse and process additional keyword arguments for Ultralytics model inference.
+    Parse ``--model_kwargs`` (``'key1=value1,key2=value2'``) into keyword arguments for Ultralytics.
+
+    Keys are passed through unchecked, so any argument the installed Ultralytics accepts works,
+    including ones added after this was written. Values are read as Python literals where they are
+    one (``0.5``, ``True``, ``None``, ``[0, 2]``, ``(640, 480)``) and as strings otherwise, and commas
+    inside brackets or quotes do not split pairs. A malformed string raises ``ValueError`` rather
+    than running with defaults, since the provenance would then record settings that never ran.
     """
-    if not kwargs_string:
+    if not kwargs_string or not kwargs_string.strip():
         return {}
 
-    def parse_value(value: str):
-        """Helper function to parse individual values."""
-        if value.lower() == 'true':
-            return True
-        elif value.lower() == 'false':
-            return False
-        try:
-            return int(value)
-        except ValueError:
-            try:
-                return float(value)
-            except ValueError:
-                return value
+    kwargs = {}
+    for pair in _split_top_level(kwargs_string):
+        key, sep, value = pair.partition("=")
+        key = key.strip()
+        if not sep or not key.isidentifier():
+            raise ValueError(f"Invalid model_kwargs entry '{pair.strip()}', expected 'key=value'")
+        kwargs[key] = _parse_kwarg_value(value.strip())
+    return kwargs
 
+
+def _split_top_level(text: str) -> List[str]:
+    """Split on commas that are not inside brackets or quotes."""
+    parts, depth, quote, current = [], 0, None, []
+    for char in text:
+        if quote:
+            quote = None if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return [part for part in parts if part.strip()]
+
+
+def _parse_kwarg_value(value: str):
+    """A Python literal if the value is one, with lower-case true/false/none accepted too; else the string."""
+    lowered = value.lower()
+    if lowered in ("true", "false", "none"):
+        return {"true": True, "false": False, "none": None}[lowered]
     try:
-        kwargs = {}
-        for kv_pair in kwargs_string.split(','):
-            if '=' not in kv_pair:
-                raise ValueError(f"Invalid key-value pair: '{kv_pair}'")
-            k, v = kv_pair.split('=', 1)
-            kwargs[k.strip()] = parse_value(v.strip())
-        return kwargs
-    except Exception as e:
-        print(f"Error parsing model_kwargs: {e}. Using default model settings.")
-        return {}
+        return ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return value
 
 
 def load_label_map(label_map_path: Path, reverse=False) -> Union[dict, None]:

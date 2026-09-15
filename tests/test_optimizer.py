@@ -310,7 +310,7 @@ def no_sweep(monkeypatch):
     """Replace the SAM passes with a deterministic result, and record which runs were asked for."""
     called = []
 
-    def fake_sweep(spec, img_source, gt_dir, hbb_dir=None, no_bar=True, quiet=False):
+    def fake_sweep(spec, img_source, gt_dir, hbb_dir=None, no_bar=True, quiet=False, models_dir=None):
         called.append(spec.name)
         return fake_outcome([grid_point(sf=sf) for sf in spec.scale_factors])
 

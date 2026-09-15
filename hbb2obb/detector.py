@@ -14,60 +14,71 @@ only attaches the confidence of the detection that backs each one, which is how 
 manually corrected set gains confidence scores without losing the corrections.
 """
 
+import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from urllib.parse import urlparse
 
 import numpy as np
+
+from hbb2obb.weights import resolve_models_dir
 
 # The ultralytics and converter imports are deferred into the functions that need them, so that
 # importing this module for its registry alone (which --help does) stays fast.
 
 # Curated detectors that are not Ultralytics' own, keyed by the name --model accepts. Anything
-# not listed here is passed through: an Ultralytics model name or a path to a local .pt file,
-# or a Hugging Face reference written as '<user>/<repo>/<file>.pt'.
-HF_URL = "https://huggingface.co/{repo}/resolve/main/{filename}"
+# not listed here is passed through: a local .pt file, a Hugging Face file (a link, or
+# '<user>/<repo>/<file>.pt'), any other link to a checkpoint, or an Ultralytics model name.
+HF_URL = "https://huggingface.co/{repo}/resolve/{revision}/{filename}"
 
 
 @dataclass(frozen=True)
 class DetectorSpec:
-    """A known detector: where its weights come from and the settings it was validated at."""
+    """
+    A known detector: where its weights come from and the settings it was validated at.
 
+    How to credit it is deliberately not here. Its licence and references are read from the
+    Hugging Face Hub's metadata for ``repo`` when provenance is written (see ``hbb2obb.hub``).
+    """
+
+    repo: str
     filename: str
-    url: str
     imgsz: int
     conf: float
     iou: float
     classes: Optional[Tuple[int, ...]]
     description: str
 
+    @property
+    def url(self) -> str:
+        return HF_URL.format(repo=self.repo, revision="main", filename=self.filename) if self.repo else ""
+
 
 SUPPORTED_DETECTORS: Dict[str, DetectorSpec] = {
     "geotrax": DetectorSpec(
+        repo="rfonod/geo-trax",
         filename="geotrax_hbb_yolov8s_1920_v1.pt",
-        url=HF_URL.format(repo="rfonod/geo-trax", filename="geotrax_hbb_yolov8s_1920_v1.pt"),
         imgsz=1920,
         conf=0.25,
         iou=0.45,
         # Car, Bus, Truck, Motorcycle. The model also carries pedestrian and bicycle classes,
         # which are underrepresented in its training data and not recommended for use.
         classes=(0, 1, 2, 3),
-        description="YOLOv8s vehicle detector for high-altitude drone imagery (Geo-trax, CC BY 4.0)",
+        description="YOLOv8s vehicle detector for high-altitude drone imagery (Geo-trax)",
     ),
 }
 
 # Settings for a detector that is not in the registry, matching the Ultralytics defaults.
 DEFAULT_SPEC = DetectorSpec(
+    repo="",
     filename="",
-    url="",
     imgsz=640,
     conf=0.25,
     iou=0.7,
     classes=None,
     description="",
 )
-
-WEIGHTS_DIR = Path("models")
 
 # Cache of loaded detectors, keyed by the resolved weights path, so that a run over a directory
 # of images loads the model once rather than once per image, as the SAM cache does.
@@ -79,31 +90,85 @@ def spec_for(model: str) -> DetectorSpec:
     return SUPPORTED_DETECTORS.get(model, DEFAULT_SPEC)
 
 
-def resolve_weights(model: str) -> Path:
-    """
-    Resolve a ``--model`` value to a weights file on disk, downloading it if it is not there yet.
+@dataclass(frozen=True)
+class HubFile:
+    """A file in a Hugging Face model repository."""
 
-    Four things are accepted, in this order: a name in ``SUPPORTED_DETECTORS``, a path to an
-    existing file, a Hugging Face reference ``<user>/<repo>/<file>.pt``, and an Ultralytics model
-    name such as ``yolo11s.pt``. Everything lands in ``models/`` beside the SAM checkpoints,
-    which is the convention the rest of the package uses, and the Ultralytics names are left
-    for Ultralytics itself to fetch on first use. All three Hugging Face parts are required:
-    the resolve URL it builds names an exact file, and there is no way to ask for "the" file
-    in a repo without naming it, even when the repo holds only one.
+    repo: str
+    revision: str
+    path: str
+
+    @property
+    def url(self) -> str:
+        return HF_URL.format(repo=self.repo, revision=self.revision, filename=self.path)
+
+
+_HF_LINK = re.compile(r"^https?://(?:www\.)?huggingface\.co/([^/]+/[^/]+)/(?:resolve|blob)/([^/]+)/([^?#]+)")
+
+
+def hub_file(model: str) -> Optional[HubFile]:
+    """
+    The Hugging Face file a ``--model`` value names, or ``None`` if it names none.
+
+    A link to a file on the Hub (``.../resolve/<revision>/<path>`` or the ``/blob/`` page link) and
+    the short form ``<user>/<repo>/<path>`` both qualify; ``<path>`` may sit in a subfolder. The
+    short form is not tried for anything that exists on disk or reads as a filesystem path.
     """
     if model in SUPPORTED_DETECTORS:
         spec = SUPPORTED_DETECTORS[model]
-        return download_weights(spec.url, WEIGHTS_DIR / spec.filename)
+        return HubFile(spec.repo, "main", spec.filename) if spec.repo else None
+    link = _HF_LINK.match(model)
+    if link:
+        return HubFile(link.group(1), link.group(2), link.group(3))
+    if _is_url(model) or Path(model).exists() or model.startswith(("/", ".", "~")) or "\\" in model:
+        return None
+    parts = model.split("/")
+    if len(parts) >= 3 and all(parts) and model.endswith(".pt"):
+        return HubFile("/".join(parts[:2]), "main", "/".join(parts[2:]))
+    return None
 
+
+def hf_repo(model: str) -> Optional[str]:
+    """The Hugging Face repository a ``--model`` value comes from, or ``None`` for anything else."""
+    found = hub_file(model)
+    return found.repo if found else None
+
+
+def _is_url(model: str) -> bool:
+    return model.startswith(("http://", "https://"))
+
+
+def resolve_weights(model: str, models_dir: Optional[Path] = None) -> Path:
+    """
+    Resolve a ``--model`` value to a weights file on disk, downloading it if it is not there yet.
+
+    Accepted, in this order: a name in ``SUPPORTED_DETECTORS``; a path to an existing file; a
+    Hugging Face file, as a link or as ``<user>/<repo>/<path>.pt``; any other ``http(s)`` link to a
+    checkpoint; and an Ultralytics model name such as ``yolo11s.pt``. Downloads land in the models
+    directory beside the SAM checkpoints (``models_dir``, else ``$HBB2OBB_MODELS_DIR``, else
+    ``models``) under the file's own name, and Ultralytics names are left for Ultralytics itself to
+    fetch on first use. A path-like value that exists nowhere is an error rather than a guess.
+    """
+    weights_dir = resolve_models_dir(models_dir)
     path = Path(model)
-    if path.exists():
+    if model not in SUPPORTED_DETECTORS and path.is_file():
         return path
 
-    if "/" in model and model.endswith(".pt"):
-        repo, _, filename = model.rpartition("/")
-        return download_weights(HF_URL.format(repo=repo, filename=filename), WEIGHTS_DIR / filename)
+    found = hub_file(model)
+    if found is not None:
+        return download_weights(found.url, weights_dir / PurePosixPath(found.path).name)
 
-    return WEIGHTS_DIR / (model if model.endswith(".pt") else f"{model}.pt")
+    if _is_url(model):
+        name = PurePosixPath(urlparse(model).path).name
+        if not name:
+            raise ValueError(f"Cannot tell which file {model} names; link to the checkpoint itself")
+        return download_weights(model, weights_dir / name)
+
+    if "/" in model or "\\" in model:
+        raise FileNotFoundError(
+            f"{model} is not an existing file, a Hugging Face reference (<user>/<repo>/<file>.pt) or a link"
+        )
+    return weights_dir / (model if model.endswith(".pt") else f"{model}.pt")
 
 
 def download_weights(url: str, destination: Path) -> Path:
@@ -119,11 +184,11 @@ def download_weights(url: str, destination: Path) -> Path:
     return destination
 
 
-def load_detector(model: str = "geotrax"):
+def load_detector(model: str = "geotrax", models_dir: Optional[Path] = None):
     """Load a detector by name or path, reusing a cached instance when one is already loaded."""
     from ultralytics import YOLO
 
-    weights = resolve_weights(model)
+    weights = resolve_weights(model, models_dir)
     key = str(weights)
     if key not in _MODEL_CACHE:
         _MODEL_CACHE[key] = YOLO(weights)
@@ -133,6 +198,52 @@ def load_detector(model: str = "geotrax"):
 def clear_detector_cache() -> None:
     """Clear the in-process detector cache, releasing the associated memory."""
     _MODEL_CACHE.clear()
+
+
+# The named detect_hbb arguments that are themselves Ultralytics predictor arguments, and so could
+# also arrive through model_kwargs.
+PREDICTOR_ARGUMENTS = ("imgsz", "conf", "iou", "classes", "max_det", "device")
+
+
+def conflicting_kwargs(model_kwargs: Optional[Dict[str, Any]], **named: Any) -> List[str]:
+    """The predictor arguments given both by name and in ``model_kwargs``, which would disagree silently."""
+    return sorted(key for key, value in named.items() if value is not None and key in (model_kwargs or {}))
+
+
+def predictor_settings(
+    model: str,
+    imgsz: int = None,
+    conf: float = None,
+    iou: float = None,
+    classes: Sequence[int] = None,
+    max_det: int = None,
+    device: str = None,
+    model_kwargs: Dict[str, Any] = None,
+) -> Dict[str, Any]:
+    """
+    The keyword arguments the Ultralytics predictor receives: ``model_kwargs`` passed through as
+    they are, then each named argument, then the detector's own validated setting for whatever is
+    still unset. A key given both by name and in ``model_kwargs`` raises ``ValueError``.
+    """
+    conflicts = conflicting_kwargs(
+        model_kwargs, imgsz=imgsz, conf=conf, iou=iou, classes=classes, max_det=max_det, device=device
+    )
+    if conflicts:
+        raise ValueError(f"given both as an argument and in model_kwargs: {', '.join(conflicts)}")
+
+    spec = spec_for(model)
+    kwargs = dict(model_kwargs or {})
+    kwargs.setdefault("imgsz", imgsz if imgsz is not None else spec.imgsz)
+    kwargs.setdefault("conf", conf if conf is not None else spec.conf)
+    kwargs.setdefault("iou", iou if iou is not None else spec.iou)
+    selected = classes if classes is not None else spec.classes
+    if selected is not None:
+        kwargs.setdefault("classes", list(selected))
+    if max_det is not None:
+        kwargs.setdefault("max_det", max_det)
+    if device is not None:
+        kwargs.setdefault("device", device)
+    return kwargs
 
 
 def detect_hbb(
@@ -146,6 +257,7 @@ def detect_hbb(
     max_det: int = None,
     device: str = None,
     model_kwargs: Dict[str, Any] = None,
+    models_dir: Optional[Path] = None,
 ) -> np.ndarray:
     """
     Detect horizontal bounding boxes in one image.
@@ -161,26 +273,16 @@ def detect_hbb(
                    dropped, so it selects and renumbers in one step
         max_det: Maximum detections per image
         device: Inference device, e.g. 'cpu', '0', 'mps' (default: Ultralytics picks)
-        model_kwargs: Additional keyword arguments for the Ultralytics predictor
+        model_kwargs: Any other Ultralytics predictor arguments, passed through unchecked; a key
+                      that is also given by name above raises ``ValueError``
+        models_dir: Weights directory (default: ``$HBB2OBB_MODELS_DIR``, else ``models``)
 
     Returns:
         An (N, 6) array of ``class, x_center, y_center, width, height, confidence``, the
         coordinates in absolute pixels, ordered by descending confidence.
     """
-    spec = spec_for(model)
-    detector = load_detector(model)
-
-    kwargs = dict(model_kwargs or {})
-    kwargs.setdefault("imgsz", imgsz if imgsz is not None else spec.imgsz)
-    kwargs.setdefault("conf", conf if conf is not None else spec.conf)
-    kwargs.setdefault("iou", iou if iou is not None else spec.iou)
-    selected = classes if classes is not None else spec.classes
-    if selected is not None:
-        kwargs.setdefault("classes", list(selected))
-    if max_det is not None:
-        kwargs.setdefault("max_det", max_det)
-    if device is not None:
-        kwargs.setdefault("device", device)
+    kwargs = predictor_settings(model, imgsz, conf, iou, classes, max_det, device, model_kwargs)
+    detector = load_detector(model, models_dir)
 
     result = detector(img, verbose=False, **kwargs)[0]
     boxes = result.boxes

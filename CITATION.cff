@@ -15,5 +15,5 @@ identifiers:
 repository-code: 'https://github.com/rfonod/hbb2obb'
 url: 'https://github.com/rfonod/hbb2obb'
 license: MIT
-version: 1.11.0
-date-released: '2026-09-11'
+version: 1.11.1
+date-released: '2026-09-15'

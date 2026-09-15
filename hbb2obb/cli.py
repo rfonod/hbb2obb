@@ -45,10 +45,17 @@ ENTRY_POINTS_EPILOG = (
 
 
 DETECTION_PROVENANCE_NAME = "PROVENANCE_hbb.txt"
+CONVERSION_PROVENANCE_NAME = "PROVENANCE_obb.txt"
 
 
 # Beyond this a float has no digits left to give, so the extra decimals are formatting noise.
 MAX_PRECISION = 17
+
+
+MODELS_DIR_HELP = (
+    "Directory checkpoints are read from and downloaded to "
+    "(default: $HBB2OBB_MODELS_DIR if set, else models/ in the working directory)"
+)
 
 
 def check_precision(parser: argparse.ArgumentParser, precision: int, normalize: bool) -> None:
@@ -85,9 +92,9 @@ def warn_if_precision_loses_pixels(precision: int, img_shape) -> bool:
     return True
 
 
-def provenance_path(label_dir: Path, name: str = "PROVENANCE.txt") -> Path:
+def provenance_path(label_dir: Path, name: str = CONVERSION_PROVENANCE_NAME) -> Path:
     """
-    Where a conversion's or detection's PROVENANCE.txt goes: beside the label directory, not in it.
+    Where a conversion's or detection's PROVENANCE file goes: beside the label directory, not in it.
 
     It is a ``.txt`` file, and a label directory is read with ``labels/*.txt`` by most tooling that
     is not this one, so a record left inside would be parsed as a frame. One level up it sits with
@@ -95,9 +102,9 @@ def provenance_path(label_dir: Path, name: str = "PROVENANCE.txt") -> Path:
     is unaffected: its record goes in the output folder, which holds runs rather than labels.
 
     One level up is shared, though: ``labels_hbb`` and ``labels_obb`` have the same parent, so a
-    detection record under the plain name would be overwritten by the conversion that reads it,
+    detection record under the same name would be overwritten by the conversion that reads it,
     losing the detector's checkpoint hash and settings. Detection therefore writes
-    ``PROVENANCE_hbb.txt``, and the conversion keeps the plain name for the set it produces.
+    ``PROVENANCE_hbb.txt`` and the conversion ``PROVENANCE_obb.txt``, one name per set it names.
     """
     return label_dir.parent / name
 
@@ -278,13 +285,19 @@ def main_hbb2obb():
         "--model_kwargs",
         "-k",
         type=str,
-        help="Additional keyword arguments for ultralytics model inference in format 'key1=value1,key2=value2'",
+        help="Any other Ultralytics predictor arguments, passed through unchecked, as 'key1=value1,key2=value2'; "
+        "values are Python literals where they parse as one (e.g. 'agnostic_nms=True,classes=[0,2]')",
+    )
+    parser.add_argument(
+        "--models_dir",
+        type=Path,
+        help=MODELS_DIR_HELP,
     )
     parser.add_argument(
         "--save_provenance",
         action="store_true",
         help=(
-            "Write a PROVENANCE.txt one level above the OBB annotations: the command that reproduces "
+            "Write a PROVENANCE_obb.txt one level above the OBB annotations: the command that reproduces "
             "them, the hbb2obb version and commit, the dependency versions and the SHA-256 of every "
             "checkpoint used"
         ),
@@ -316,7 +329,10 @@ def main_hbb2obb():
     check_precision(parser, args.precision, args.normalize)
     precision = args.precision if args.precision is not None else DEFAULT_NORMALIZED_PRECISION
 
-    model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
+    try:
+        model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     # --confidence_dir writes the scores beside the labels rather than into them, so it needs the
     # scores computed without putting them in the label file. An empty string is the bare form,
@@ -349,6 +365,7 @@ def main_hbb2obb():
             return_confidence=want_confidence,
             confidence_source=args.confidence_source,
             return_contours=args.save_polygon,
+            models_dir=args.models_dir,
         )
 
         # Unpack the extras hbb2obb() appends for the flags that were requested
@@ -398,7 +415,7 @@ def main_hbb2obb():
 
         obb_dir = resolve_output_dir(args.obb_dir, image_paths[0], "labels_obb")
         provenance.write_conversion_provenance(
-            out=provenance_path(obb_dir),
+            out=provenance_path(obb_dir, CONVERSION_PROVENANCE_NAME),
             img_source=args.img_source,
             hbb_dir=get_hbb_dir(args.img_source, args.hbb_dir),
             obb_dir=obb_dir,
@@ -414,6 +431,7 @@ def main_hbb2obb():
             precision=precision if args.normalize else None,
             save_confidence=args.save_confidence,
             confidence_dir=args.confidence_dir,
+            models_dir=args.models_dir,
         )
 
 
@@ -440,8 +458,8 @@ def main_hbb2obb_detect():
         "-m",
         type=str,
         default="geotrax",
-        help="Registered detector (default: geotrax), an Ultralytics model name or .pt path, or a "
-        "Hugging Face reference written as '<user>/<repo>/<file>.pt'",
+        help="Registered detector (default: geotrax), a local .pt file, a Hugging Face file as a link or "
+        "as '<user>/<repo>/<file>.pt', any other link to a .pt checkpoint, or an Ultralytics model name",
     )
 
     detect_group = parser.add_argument_group('detection options')
@@ -467,7 +485,13 @@ def main_hbb2obb_detect():
         "--model_kwargs",
         "-k",
         type=str,
-        help="Additional keyword arguments for ultralytics model inference in format 'key1=value1,key2=value2'",
+        help="Any other Ultralytics predictor arguments, passed through unchecked, as 'key1=value1,key2=value2'; "
+        "values are Python literals where they parse as one (e.g. 'agnostic_nms=True,classes=[0,2]')",
+    )
+    detect_group.add_argument(
+        "--models_dir",
+        type=Path,
+        help=MODELS_DIR_HELP,
     )
 
     merge_group = parser.add_argument_group('merging with existing annotations')
@@ -520,7 +544,13 @@ def main_hbb2obb_detect():
     import numpy as np
     import tqdm
 
-    from hbb2obb.detector import detect_hbb, merge_detections, parse_class_map, save_hbb_annotations
+    from hbb2obb.detector import (
+        detect_hbb,
+        merge_detections,
+        parse_class_map,
+        predictor_settings,
+        save_hbb_annotations,
+    )
     from hbb2obb.utils import Annotations, get_image_paths, process_ultralytics_kwargs
 
     image_paths = get_image_paths(args.img_source)
@@ -539,7 +569,13 @@ def main_hbb2obb_detect():
     except ValueError as exc:
         parser.error(str(exc))
 
-    model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
+    try:
+        model_kwargs = process_ultralytics_kwargs(args.model_kwargs)
+        settings = predictor_settings(
+            args.model, args.imgsz, args.conf, args.iou, args.classes, args.max_det, args.device, model_kwargs
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     totals = {"boxes": 0, "matched": 0, "missed": 0, "extra": 0, "conflicts": 0}
     counts = {}
     warned_precision = False
@@ -564,6 +600,7 @@ def main_hbb2obb_detect():
             max_det=args.max_det,
             device=args.device,
             model_kwargs=model_kwargs,
+            models_dir=args.models_dir,
         )
 
         if args.merge_with:
@@ -614,26 +651,30 @@ def main_hbb2obb_detect():
 
     if args.save_provenance:
         from hbb2obb import provenance
-        from hbb2obb.detector import resolve_weights, spec_for
+        from hbb2obb.detector import resolve_weights
 
         # Record what actually ran, not what was typed: an unset flag takes the registered
-        # detector's own validated setting, which is the value worth pinning.
-        spec = spec_for(args.model)
+        # detector's own validated setting, and a predictor argument may have come through
+        # --model_kwargs instead of its own flag.
         provenance.write_detection_provenance(
             out=provenance_path(hbb_dir, DETECTION_PROVENANCE_NAME),
             img_source=args.img_source,
             hbb_dir=hbb_dir,
             model=args.model,
-            weights=resolve_weights(args.model),
-            imgsz=args.imgsz if args.imgsz is not None else spec.imgsz,
-            conf=args.conf if args.conf is not None else spec.conf,
-            iou=args.iou if args.iou is not None else spec.iou,
-            classes=args.classes if args.classes is not None else spec.classes,
+            weights=resolve_weights(args.model, args.models_dir),
+            imgsz=settings["imgsz"],
+            conf=settings["conf"],
+            iou=settings["iou"],
+            classes=settings.get("classes"),
             merged_with=args.merge_with,
             model_kwargs=args.model_kwargs,
-            device=args.device,
+            device=settings.get("device"),
             normalize=args.normalize,
             precision=args.precision,
+            class_map=args.class_map,
+            max_det=settings.get("max_det"),
+            save_confidence=args.save_confidence,
+            merge_iou=args.merge_iou,
         )
 
 
@@ -1463,6 +1504,11 @@ def main_hbb2obb_optimize():
         type=str,
         help="Additional keyword arguments for model in format 'key1=value1,key2=value2'",
     )
+    parser.add_argument(
+        "--models_dir",
+        type=Path,
+        help=MODELS_DIR_HELP,
+    )
     parser.add_argument("--no_plot", action="store_true", help="Do not render any plot")
     parser.add_argument(
         "--plot_metric",
@@ -1628,7 +1674,7 @@ def main_hbb2obb_optimize():
             print(f"Run: {spec.name}   ({spec.describe_grid()})")
             print("=" * 116)
 
-            outcome = optimizer.sweep(spec, img_source, gt_dir, hbb_dir, no_bar=True)
+            outcome = optimizer.sweep(spec, img_source, gt_dir, hbb_dir, no_bar=True, models_dir=args.models_dir)
             config_dict = optimizer.run_config_dict(spec, img_source, gt_dir, hbb_dir)
             optimizer.write_run(run_folder, spec, outcome, config_dict, plot=plot, metric=args.plot_metric)
             optimizer.print_best(outcome["best_parameters"], run_folder)
@@ -1692,6 +1738,7 @@ def main_hbb2obb_optimize():
             gt_dir=gt_dir,
             grid_description=specs[0].describe_grid() if specs else "no runs",
             elapsed_seconds=elapsed,
+            models_dir=args.models_dir,
             notes=notes,
         )
         wrote_provenance = True

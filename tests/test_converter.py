@@ -336,6 +336,10 @@ class TestModelCache(unittest.TestCase):
         load_sam_model("sam_b")
         self.assertEqual(len(self.sam_calls), 2)
 
+    def test_checkpoints_load_from_the_models_directory_given(self):
+        load_sam_model("sam_b", models_dir=Path("/weights"))
+        self.assertEqual(self.sam_calls, [str(Path("/weights") / "sam_b.pt")])
+
 
 class TestConfidence(unittest.TestCase):
     """Tests for the per-OBB confidence score."""
@@ -657,7 +661,7 @@ class TestDeviceForwarding(unittest.TestCase):
     def setUp(self):
         self.model = self._FakeModel()
         self._orig_loader = converter.load_sam_model
-        converter.load_sam_model = lambda _name: self.model
+        converter.load_sam_model = lambda _name, **_kwargs: self.model
 
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
@@ -785,7 +789,7 @@ class TestDeviceResultRelease(unittest.TestCase):
     def setUp(self):
         self.models = {name: self._FakeModel(self._FakeMasks()) for name in ("sam_b", "sam_l")}
         self._orig_loader = converter.load_sam_model
-        converter.load_sam_model = lambda name: self.models[name]
+        converter.load_sam_model = lambda name, **_kwargs: self.models[name]
 
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
