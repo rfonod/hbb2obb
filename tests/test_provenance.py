@@ -126,6 +126,30 @@ def test_dirtiness_is_measured_over_the_package_not_the_whole_repository(tmp_pat
     assert provenance.git_state(repo, package)["dirty"] == 1
 
 
+def test_an_install_inside_another_repository_is_not_that_repositorys_commit(tmp_path):
+    """
+    A wheel installed into a virtual environment inside someone else's checkout sits in their
+    work tree, ignored. Asking git from the package directory then answers for their repository,
+    and the record named its HEAD as hbb2obb's commit and said the code matched it.
+    """
+    import subprocess
+
+    repo = tmp_path / "other_project"
+    package = repo / ".venv" / "lib" / "site-packages" / "hbb2obb"
+    package.mkdir(parents=True)
+    (package / "converter.py").write_text("x = 1\n")
+    (repo / ".gitignore").write_text(".venv/\n")
+    (repo / "main.py").write_text("print('their code')\n")
+    for args in (["init", "-q"], ["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "i"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    assert provenance.git_state(package_root=package) == {"commit": None, "describe": None, "dirty": None}
+
+    # The same copy, untracked but not ignored, is not theirs either.
+    (repo / ".gitignore").write_text("")
+    assert provenance.git_state(package_root=package)["commit"] is None
+
+
 def test_header_survives_an_installed_wheel(monkeypatch):
     """A PyPI install has no checkout, and that is not an error: the digest still identifies it."""
     monkeypatch.setattr(provenance, "git_state", lambda: {"commit": None, "describe": None, "dirty": None})

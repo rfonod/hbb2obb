@@ -107,6 +107,12 @@ def git_state(repo: Optional[Path] = None, package_root: Path = PACKAGE_ROOT) ->
 
     A wheel installed from PyPI has no checkout, and that is not an error.
 
+    A commit is reported only when the repository actually **tracks** the package source. Asking
+    git from the package directory alone is not enough: a wheel installed into a virtual
+    environment inside somebody else's checkout resolves to *that* repository, whose HEAD would
+    then be reported as hbb2obb's commit, and since the environment is ignored there, as matching
+    it. An installed copy is untracked wherever it sits, so it reads as no checkout, which is true.
+
     ``dirty`` counts modified paths **under the package directory only**, not across the whole
     repository. The question this line answers is "can a reader check out this commit and get
     the code that ran", and output written by the run itself cannot change that answer: a sweep
@@ -114,6 +120,7 @@ def git_state(repo: Optional[Path] = None, package_root: Path = PACKAGE_ROOT) ->
     while the code behind it sat clean and committed.
     """
     repo = Path(repo) if repo is not None else package_root.parent
+    no_checkout = {"commit": None, "describe": None, "dirty": None}
 
     def git(*args: str) -> Optional[str]:
         try:
@@ -125,8 +132,8 @@ def git_state(repo: Optional[Path] = None, package_root: Path = PACKAGE_ROOT) ->
         return done.stdout.strip() if done.returncode == 0 else None
 
     commit = git("rev-parse", "HEAD")
-    if commit is None:
-        return {"commit": None, "describe": None, "dirty": None}
+    if commit is None or not git("ls-files", "--", str(package_root)):
+        return no_checkout
     status = git("status", "--porcelain", "--", str(package_root))
     dirty = None if status is None else len([line for line in status.splitlines() if line.strip()])
     # No --dirty here: that flag is repository-wide and would contradict the package-scoped
