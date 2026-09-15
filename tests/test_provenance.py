@@ -7,6 +7,7 @@ quietly left out.
 """
 
 import hashlib
+import shlex
 
 from hbb2obb import provenance
 
@@ -183,7 +184,9 @@ def test_conversion_provenance_records_the_command_and_the_checkpoints(tmp_path)
 
     assert status == 0
     text = out.read_text()
-    assert "hbb2obb " + str(tmp_path / "images") in text
+    command = shlex.split(recorded_command(out))
+    assert command[0] == "hbb2obb"
+    assert command[1] == str(tmp_path / "images")
     assert "--sam_models sam_b --imgsz 1280 --scale_factors 0.05" in text
     assert "--confidence_source combined" in text
     assert hashlib.sha256(b"weights").hexdigest() in text
