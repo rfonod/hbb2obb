@@ -29,22 +29,22 @@ def test_help_nudges_the_reader_to_explore(monkeypatch, capsys):
 
 def test_provenance_lands_beside_the_labels_not_among_them(tmp_path):
     """
-    A PROVENANCE.txt inside a label directory is read as a frame by any `labels/*.txt` glob, which
+    A PROVENANCE file inside a label directory is read as a frame by any `labels/*.txt` glob, which
     is how most tooling that is not this one reads YOLO labels. It belongs one level up.
     """
     labels = tmp_path / "train" / "labels"
-    assert cli.provenance_path(labels) == tmp_path / "train" / "PROVENANCE.txt"
+    assert cli.provenance_path(labels) == tmp_path / "train" / "PROVENANCE_obb.txt"
 
 
 def test_detection_and_conversion_records_do_not_overwrite_each_other(tmp_path):
     """
-    labels_hbb and labels_obb share a parent, so one level up is one path for both commands. The
-    detection record therefore has its own name; under the plain one the conversion that reads
-    those HBBs would erase the detector's checkpoint hash and settings.
+    labels_hbb and labels_obb share a parent, so one level up is one path for both commands. Each
+    record therefore has its own name; sharing one would let the conversion that reads those HBBs
+    erase the detector's checkpoint hash and settings.
     """
     root = tmp_path / "dataset"
     detection = cli.provenance_path(root / "labels_hbb", cli.DETECTION_PROVENANCE_NAME)
-    conversion = cli.provenance_path(root / "labels_obb")
+    conversion = cli.provenance_path(root / "labels_obb", cli.CONVERSION_PROVENANCE_NAME)
     assert detection.parent == conversion.parent == root
     assert detection != conversion
 

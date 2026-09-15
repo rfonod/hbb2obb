@@ -593,7 +593,7 @@ Each run takes the `defaults` and overrides whatever it names; a run with no `na
 
 ### Recording Provenance
 
-`--save_provenance` records what a run actually did, so a release can be regenerated rather than taken on trust. The file lands one level above the label directory: `--obb_dir train/labels` leaves `train/PROVENANCE.txt`. `hbb2obb-detect` writes `PROVENANCE_hbb.txt` there instead, and `hbb2obb-optimize` writes `PROVENANCE.txt` inside its output folder.
+`--save_provenance` records what a run actually did, so a release can be regenerated rather than taken on trust. The file lands one level above the label directory: `--obb_dir train/labels` leaves `train/PROVENANCE_obb.txt`. `hbb2obb-detect` writes `PROVENANCE_hbb.txt` there instead, and `hbb2obb-optimize` writes `PROVENANCE.txt` inside its output folder.
 
 ```bash
 hbb2obb /path/to/images --sam_models sam_l sam_b sam2_b sam2.1_b --save_confidence --save_provenance

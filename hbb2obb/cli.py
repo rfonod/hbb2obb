@@ -45,6 +45,7 @@ ENTRY_POINTS_EPILOG = (
 
 
 DETECTION_PROVENANCE_NAME = "PROVENANCE_hbb.txt"
+CONVERSION_PROVENANCE_NAME = "PROVENANCE_obb.txt"
 
 
 # Beyond this a float has no digits left to give, so the extra decimals are formatting noise.
@@ -91,9 +92,9 @@ def warn_if_precision_loses_pixels(precision: int, img_shape) -> bool:
     return True
 
 
-def provenance_path(label_dir: Path, name: str = "PROVENANCE.txt") -> Path:
+def provenance_path(label_dir: Path, name: str = CONVERSION_PROVENANCE_NAME) -> Path:
     """
-    Where a conversion's or detection's PROVENANCE.txt goes: beside the label directory, not in it.
+    Where a conversion's or detection's PROVENANCE file goes: beside the label directory, not in it.
 
     It is a ``.txt`` file, and a label directory is read with ``labels/*.txt`` by most tooling that
     is not this one, so a record left inside would be parsed as a frame. One level up it sits with
@@ -101,9 +102,9 @@ def provenance_path(label_dir: Path, name: str = "PROVENANCE.txt") -> Path:
     is unaffected: its record goes in the output folder, which holds runs rather than labels.
 
     One level up is shared, though: ``labels_hbb`` and ``labels_obb`` have the same parent, so a
-    detection record under the plain name would be overwritten by the conversion that reads it,
+    detection record under the same name would be overwritten by the conversion that reads it,
     losing the detector's checkpoint hash and settings. Detection therefore writes
-    ``PROVENANCE_hbb.txt``, and the conversion keeps the plain name for the set it produces.
+    ``PROVENANCE_hbb.txt`` and the conversion ``PROVENANCE_obb.txt``, one name per set it names.
     """
     return label_dir.parent / name
 
@@ -296,7 +297,7 @@ def main_hbb2obb():
         "--save_provenance",
         action="store_true",
         help=(
-            "Write a PROVENANCE.txt one level above the OBB annotations: the command that reproduces "
+            "Write a PROVENANCE_obb.txt one level above the OBB annotations: the command that reproduces "
             "them, the hbb2obb version and commit, the dependency versions and the SHA-256 of every "
             "checkpoint used"
         ),
@@ -414,7 +415,7 @@ def main_hbb2obb():
 
         obb_dir = resolve_output_dir(args.obb_dir, image_paths[0], "labels_obb")
         provenance.write_conversion_provenance(
-            out=provenance_path(obb_dir),
+            out=provenance_path(obb_dir, CONVERSION_PROVENANCE_NAME),
             img_source=args.img_source,
             hbb_dir=get_hbb_dir(args.img_source, args.hbb_dir),
             obb_dir=obb_dir,

@@ -4,7 +4,7 @@
 """
 Provenance records for annotations and benchmarks.
 
-A ``PROVENANCE.txt`` says exactly how a set of annotations, or a set of numbers, was produced:
+A PROVENANCE file says exactly how a set of annotations, or a set of numbers, was produced:
 the command that reproduces it, the versions of hbb2obb and everything it depends on, and the
 SHA-256 of every checkpoint that ran. The conversion is deterministic given the same inputs,
 the same checkpoints and the same library versions, so this file is what turns "these are the
