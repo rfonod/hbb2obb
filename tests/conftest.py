@@ -100,3 +100,13 @@ def sample_pred_boxes():
             'polygon': Polygon([[700, 700], [700, 800], [800, 800], [800, 700]]),
         },
     ]
+
+
+@pytest.fixture(autouse=True)
+def no_hub_metadata(monkeypatch):
+    """Keep the suite offline: the Hugging Face Hub is unreachable unless a test supplies a response."""
+
+    def unreachable(url, timeout=None):
+        raise OSError(f"network disabled in tests ({url})")
+
+    monkeypatch.setattr("hbb2obb.hub.fetch_json", unreachable)

@@ -130,9 +130,14 @@ class TestUtils:
         # Test with empty string
         assert process_ultralytics_kwargs("") == {}
 
-        # Test with invalid input
-        result = process_ultralytics_kwargs("conf=0.25,iou")
-        assert result == {}
+        # Literals, including commas inside brackets and quotes
+        result = process_ultralytics_kwargs("classes=[0, 2],imgsz=(640, 480),device=cuda:0,name='a,b',half=none")
+        assert result == {"classes": [0, 2], "imgsz": (640, 480), "device": "cuda:0", "name": "a,b", "half": None}
+
+        # A malformed string stops rather than silently running with defaults
+        for malformed in ("conf=0.25,iou", "=0.5", "not a key=1"):
+            with pytest.raises(ValueError, match="expected 'key=value'"):
+                process_ultralytics_kwargs(malformed)
 
 
 @pytest.fixture

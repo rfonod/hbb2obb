@@ -270,6 +270,32 @@ def test_detection_provenance_hashes_the_detector(tmp_path):
     assert "Classes kept             : 0 1 2 3" in text
 
 
+def test_detection_provenance_records_every_option_that_changes_the_files(tmp_path):
+    weights = tmp_path / "geotrax.pt"
+    weights.write_bytes(b"detector")
+    out = tmp_path / "PROVENANCE_hbb.txt"
+    provenance.write_detection_provenance(
+        out=out,
+        img_source=tmp_path / "images",
+        hbb_dir=None,
+        model="geotrax",
+        weights=weights,
+        imgsz=1920,
+        conf=0.25,
+        iou=0.45,
+        class_map="2=0,5=1",
+        max_det=300,
+        save_confidence=False,
+    )
+    command = recorded_command(out)
+    for option in ("--class_map 2=0,5=1", "--max_det 300", "--no_confidence"):
+        assert option in command
+    text = out.read_text()
+    assert "Class map                : 2=0,5=1" in text
+    assert "Max detections per image : 300" in text
+    assert "Confidence written       : not written" in text
+
+
 def test_benchmark_provenance_embeds_the_config_and_hashes_both_inputs(tmp_path):
     models = tmp_path / "models"
     models.mkdir()

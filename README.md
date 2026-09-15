@@ -74,7 +74,7 @@ pip install hbb2obb
 Also works with [uv](https://docs.astral.sh/uv/) (`uv pip install hbb2obb`) and conda.
 
 > [!NOTE]
-> SAM model weights are downloaded automatically by [Ultralytics](https://docs.ultralytics.com/models/sam/) on first use into a `models/` directory relative to your **current working directory**: run commands from a consistent location so weights are reused. Detector weights for `hbb2obb-detect` land there too. The one exception is SAM 3, which must be downloaded manually (see below).
+> SAM model weights are downloaded automatically by [Ultralytics](https://docs.ultralytics.com/models/sam/) on first use into a `models/` directory relative to your **current working directory**. Detector weights for `hbb2obb-detect` land there too. To keep one copy wherever you run from, set `HBB2OBB_MODELS_DIR` once (e.g. `export HBB2OBB_MODELS_DIR=~/.cache/hbb2obb`), or pass `--models_dir` to `hbb2obb`, `hbb2obb-detect` or `hbb2obb-optimize`; the flag wins over the variable. The one exception is SAM 3, which must be downloaded manually (see below).
 
 Every command checks PyPI once a day, in the background, for a newer HBB2OBB release and prints a one-line notice if one exists. The check never blocks, never fails a run, and is silent when offline. Set `HBB2OBB_DISABLE_UPDATE_CHECK=1` to turn it off.
 
@@ -116,7 +116,7 @@ Unlike other SAM models, SAM 3 weights (`sam3.pt`) are **not** auto-downloaded b
 
 1. Request access on the [SAM 3 model page on Hugging Face](https://huggingface.co/facebook/sam3).
 2. Once approved, download [`sam3.pt`](https://huggingface.co/facebook/sam3/resolve/main/sam3.pt?download=true).
-3. Place `sam3.pt` in the `models/` directory (relative to where you run the conversion).
+3. Place `sam3.pt` in the models directory (`models/` relative to where you run the conversion, or `HBB2OBB_MODELS_DIR` / `--models_dir` if you set one).
 
 See the [Ultralytics SAM 3 documentation](https://docs.ultralytics.com/models/sam-3/) for more.
 
@@ -218,7 +218,8 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
 - `--normalize` / `-n`: write the coordinates relative to `[0, 1]` instead of in absolute px, which is what Ultralytics reads. `--precision` / `-p` sets the decimals (default: 10). Applies to `--save_polygon` output too, so one run never mixes the two conventions.
 - `--device`: inference device for the SAM model(s), e.g. `cpu`, `0`, `cuda:0`, `mps` (default: Ultralytics picks).
-- `--model_kwargs` / `-k`: extra Ultralytics inference kwargs as `key1=value1,key2=value2`.
+- `--model_kwargs` / `-k`: any other Ultralytics inference arguments, passed through unchecked, as `key1=value1,key2=value2`; values are Python literals where they parse as one (`classes=[0, 2]`).
+- `--models_dir`: where checkpoints are read from and downloaded to (default: `HBB2OBB_MODELS_DIR` if set, else `models/`).
 
 Key evaluation arguments:
 
@@ -398,7 +399,15 @@ hbb2obb /path/to/images --save_confidence --confidence_source combined
 <details>
 <summary><b>More about <code>--model</code>, class maps, and merging with hand-drawn boxes</b></summary>
 
-`--model` takes a registered detector ([`geotrax`](https://github.com/rfonod/geo-trax) today, the default), any Ultralytics model name or `.pt` path, or a Hugging Face reference written as `<user>/<repo>/<file>.pt`. All three parts are required, even when the repo holds only one file. Weights land in `models/` beside the SAM checkpoints. A registered detector brings the settings it was validated at: `geotrax` runs at `--imgsz 1920` over its four reliable classes, while anything else starts from the Ultralytics defaults. `--class_map` renumbers a detector's classes to yours: `--class_map '2=0,5=1,7=2,3=3'` turns COCO's car, bus, truck and motorcycle into `0,1,2,3` and drops every other class.
+`--model` takes a registered detector ([`geotrax`](https://github.com/rfonod/geo-trax) today, the default), a local `.pt` file, a Hugging Face file as a link (`https://huggingface.co/<user>/<repo>/resolve/<revision>/<path>.pt`, or the `/blob/` page link) or as `<user>/<repo>/<path>.pt`, any other `http(s)` link to a checkpoint, or an Ultralytics model name. An existing local file always wins, and a path that exists nowhere is an error rather than a guess. Only a registered name brings validated settings: the same weights given by link start from the Ultralytics defaults. Weights land in the models directory beside the SAM checkpoints (`models/`, `HBB2OBB_MODELS_DIR` or `--models_dir`). A registered detector brings the settings it was validated at: `geotrax` runs at `--imgsz 1920` over its four reliable classes, while anything else starts from the Ultralytics defaults. `--class_map` renumbers a detector's classes to yours: `--class_map '2=0,5=1,7=2,3=3'` turns COCO's car, bus, truck and motorcycle into `0,1,2,3` and drops every other class.
+
+Any other Ultralytics predictor argument passes straight through `--model_kwargs`, unchecked, so options Ultralytics adds later work too. Values are read as Python literals where they are one:
+
+```bash
+hbb2obb-detect /path/to/images --model_kwargs 'agnostic_nms=True,augment=True,classes=[0, 2]'
+```
+
+An argument that also has its own flag (`imgsz`, `conf`, `iou`, `classes`, `max_det`, `device`) can be given one way or the other, not both, and a malformed string stops the run instead of falling back to defaults.
 
 Detected boxes are a starting point, not ground truth. If you have hand-drawn boxes already and only want the confidence a detector would give them, `--merge_with` keeps your geometry untouched and only attaches the score of the detection covering each box:
 
@@ -598,9 +607,9 @@ hbb2obb /path/to/images --sam_models sam_l sam_b sam2_b sam2.1_b --save_confiden
 hbb2obb-detect /path/to/images --save_provenance
 ```
 
-The record holds the exact command, the settings the run used, the versions of `ultralytics`, `torch`, OpenCV, NumPy, Shapely and matplotlib, and the **SHA-256 of every checkpoint used**. A benchmark also hashes the label sets its numbers were measured against.
+The record holds the exact command, with every option that changes the files written, the settings the run used, the versions of `ultralytics`, `torch`, OpenCV, NumPy, Shapely and matplotlib, and the **SHA-256 of every checkpoint used**. A benchmark also hashes the label sets its numbers were measured against. When the weights are a Hugging Face Hub file (`geotrax`, a Hub link, or `<user>/<repo>/<file>.pt`), `PROVENANCE_hbb.txt` also records what the Hub itself declares for that repository at that moment: the licence, any DOI and arXiv paper, and the revision read. Nothing is copied from the model card's text or stored locally. A field the repository does not declare, or a Hub that cannot be reached, is recorded as such with a link to the model page, and the run still succeeds. Weights from anywhere else (a local file, another link, an Ultralytics name) are noted as needing credit by hand.
 
-The code is pinned three ways: the release version, the commit with `git describe` when there is a checkout, and a **SHA-256 over the package source**. The record states whether that commit can be checked out to get the code that ran, judging by the package directory alone. Use the commit to find the change; use the digest to prove you have the same code.
+The code is pinned three ways: the release version, the commit with `git describe` when there is a checkout, and a **SHA-256 over the package source**. The record states whether that commit can be checked out to get the code that ran, judging by the package directory alone. A commit is recorded only when the repository actually tracks hbb2obb's source, so an install inside another project's checkout reads as no checkout rather than as that project's commit. Use the commit to find the change; use the digest to prove you have the same code.
 
 </details>
 

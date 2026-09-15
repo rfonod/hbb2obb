@@ -2,7 +2,7 @@
 # Author: Robert Fonod (robert.fonod@ieee.org)
 
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import cv2
 import numpy as np
@@ -10,6 +10,7 @@ from ultralytics import SAM, FastSAM
 
 from hbb2obb import formats
 from hbb2obb.utils import Annotations, get_hbb_dir
+from hbb2obb.weights import resolve_models_dir
 
 # Cache of loaded SAM/FastSAM model instances, keyed by the resolved weights path, so that
 # repeated hbb2obb() calls (e.g. one per image in a directory) reuse an already-loaded model
@@ -28,26 +29,28 @@ DEFAULT_NORMALIZED_PRECISION = formats.DEFAULT_NORMALIZED_PRECISION
 DEFAULT_FRAGMENT_RATIO = 0.1
 
 
-def sam_checkpoint_path(model_name: str, models_dir: Path = Path('models')) -> Path:
+def sam_checkpoint_path(model_name: str, models_dir: Optional[Path] = None) -> Path:
     """
     Where a SAM/FastSAM checkpoint lives for a given model name: ``<models_dir>/<name>.pt``,
-    unless a suffix is already given. The one place this rule is written, so provenance can
-    report the exact path a run resolved rather than a second copy of the same formula.
+    unless a suffix is already given, with ``models_dir`` resolved by ``weights.resolve_models_dir``.
+    The one place this rule is written, so provenance can report the exact path a run resolved
+    rather than a second copy of the same formula.
     """
-    return models_dir / (model_name if model_name.endswith(".pt") else f"{model_name}.pt")
+    return resolve_models_dir(models_dir) / (model_name if model_name.endswith(".pt") else f"{model_name}.pt")
 
 
-def load_sam_model(model_name: str):
+def load_sam_model(model_name: str, models_dir: Optional[Path] = None):
     """
     Load a SAM/FastSAM model by name, reusing a cached instance when one is already loaded.
 
     Args:
         model_name: Model name (e.g. "sam_b", "sam2.1_b", "FastSAM-s"), with or without a ".pt" suffix.
+        models_dir: Checkpoint directory (default: ``$HBB2OBB_MODELS_DIR``, else ``models``)
 
     Returns:
         The loaded ultralytics SAM or FastSAM model instance.
     """
-    model_path = sam_checkpoint_path(model_name)
+    model_path = sam_checkpoint_path(model_name, models_dir)
     cache_key = str(model_path)
     if cache_key not in _MODEL_CACHE:
         _MODEL_CACHE[cache_key] = FastSAM(model_path) if "FastSAM" in model_name else SAM(model_path)
@@ -107,6 +110,7 @@ def hbb2obb(
     return_confidence: bool = False,
     confidence_source: str = "conversion",
     return_contours: bool = False,
+    models_dir: Optional[Path] = None,
 ) -> Union[np.ndarray, Tuple]:
     """
     Convert HBB to OBB annotations using multiple SAM models and aggregating the masks by majority vote.
@@ -142,6 +146,7 @@ def hbb2obb(
                      from the HBB input file), or 'combined' (their product)
         return_contours: If True, also return the per-object segmentation contours, in absolute
                      image pixel coordinates, with None where the OBB is a fallback HBB
+        models_dir: Checkpoint directory (default: ``$HBB2OBB_MODELS_DIR``, else ``models``)
 
     Returns:
         OBB annotations as a numpy array, with the requested extras appended in a tuple:
@@ -180,7 +185,7 @@ def hbb2obb(
 
     # Run each model and collect results
     for model_name in sam_models:
-        model = load_sam_model(model_name)
+        model = load_sam_model(model_name, models_dir=models_dir)
 
         # Run inference with the model
         results = model(

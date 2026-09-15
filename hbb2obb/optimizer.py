@@ -227,6 +227,7 @@ def sweep(
     hbb_dir: Optional[Path] = None,
     no_bar: bool = True,
     quiet: bool = False,
+    models_dir: Optional[Path] = None,
 ) -> dict:
     """
     Run one grid search and return its results.
@@ -247,7 +248,7 @@ def sweep(
     # the first one does not carry the whole ensemble's load time.
     load_start = time.time()
     for model_name in spec.sam_models:
-        converter.load_sam_model(model_name)
+        converter.load_sam_model(model_name, models_dir=models_dir)
     model_load_seconds = time.time() - load_start
 
     if not quiet:
@@ -284,6 +285,7 @@ def sweep(
                         fragment_ratio=spec.fragment_ratio,
                         model_kwargs=model_kwargs,
                         device=spec.device,
+                        models_dir=models_dir,
                     )
                 except ValueError as e:
                     print(f"Warning: skipping {img_path.name}: {e}")

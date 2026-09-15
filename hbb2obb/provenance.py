@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import platform
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -141,7 +142,7 @@ def git_state(repo: Optional[Path] = None, package_root: Path = PACKAGE_ROOT) ->
     return {"commit": commit, "describe": git("describe", "--tags", "--always"), "dirty": dirty}
 
 
-def resolve_model(name: str, models_dir: Path) -> Path:
+def resolve_model(name: str, models_dir: Optional[Path] = None) -> Path:
     """Where a checkpoint lives, per the one formula converter.load_sam_model itself resolves it by."""
     from hbb2obb.converter import sam_checkpoint_path
 
@@ -161,7 +162,7 @@ def count_images(directory: Optional[Path]) -> Optional[int]:
 
 
 def checkpoint_section(
-    names: Sequence[str], models_dir: Path, title: str = "SAM checkpoints"
+    names: Sequence[str], models_dir: Optional[Path] = None, title: str = "SAM checkpoints"
 ) -> Tuple[List[str], bool]:
     """List each checkpoint with its size and hash. Returns the lines and whether any was missing."""
     lines = ["", title, RULE]
@@ -291,7 +292,7 @@ def write_conversion_provenance(
     confidence_source: str = "conversion",
     model_kwargs: Optional[str] = None,
     device: Optional[str] = None,
-    models_dir: Path = Path("models"),
+    models_dir: Optional[Path] = None,
     notes: Sequence[str] = (),
     normalize: bool = False,
     precision: Optional[int] = None,
@@ -329,7 +330,7 @@ def write_conversion_provenance(
         "",
         "Command that reproduces these annotations",
         RULE,
-        " ".join(command),
+        shlex.join(command),
         "",
         "Conversion settings",
         RULE,
@@ -374,6 +375,49 @@ def write_conversion_provenance(
     return _write(out, lines, missing)
 
 
+def attribution_section(model: str) -> List[str]:
+    """
+    How the weights are licensed and what they reference, as the Hugging Face Hub records it.
+
+    Read from the Hub's model API when the record is written; nothing is known in advance or kept
+    locally. A field the repository does not declare, or a Hub that cannot be reached, is written
+    as such with the model page to check, and the provenance is still written.
+    """
+    from hbb2obb.detector import hf_repo
+    from hbb2obb.hub import load_hub_record
+
+    lines = ["", "Detector licence and attribution", RULE]
+    repo = hf_repo(model)
+    if repo is None:
+        return lines + [
+            "These weights are not a Hugging Face Hub file (a local file, another link, or an",
+            "Ultralytics model name), so there is no Hub metadata to read their licence from.",
+            "Credit their source by hand.",
+        ]
+
+    record = load_hub_record(repo)
+    lines.append(f"Model page     : {record.page}")
+    if record.error is not None:
+        print(f"Warning: could not read the Hub metadata of {repo} ({record.error}); its licence is not recorded.")
+        return lines + [
+            f"Hub metadata   : could not be read ({record.error})",
+            "               so the licence is not recorded here. Check the model page before",
+            "               redistributing annotations drawn with these weights.",
+        ]
+
+    lines.append(f"Hub revision   : {record.revision or 'not reported'}")
+    lines.append(f"Licence        : {record.licence or 'not declared on the Hub; check the model page'}")
+    for doi in record.dois:
+        lines.append(f"DOI            : https://doi.org/{doi}")
+    for arxiv in record.arxiv:
+        lines.append(f"arXiv          : https://arxiv.org/abs/{arxiv}")
+    if not record.dois and not record.arxiv:
+        lines.append("References     : no DOI or arXiv paper declared on the Hub; see the model page for how to cite")
+    else:
+        lines.append("Credit the weights as their licence requires; the model page says how to cite them.")
+    return lines
+
+
 def write_detection_provenance(
     out: Path,
     img_source: Optional[Path],
@@ -390,22 +434,49 @@ def write_detection_provenance(
     notes: Sequence[str] = (),
     normalize: bool = False,
     precision: Optional[int] = None,
+    class_map: Optional[str] = None,
+    max_det: Optional[int] = None,
+    save_confidence: bool = True,
+    merge_iou: Optional[float] = None,
 ) -> int:
-    """Record the detector that drew a set of horizontal boxes."""
+    """
+    Record the detector that drew a set of horizontal boxes.
+
+    The command records every option that changes the files written, so running it again gives
+    the same set; ``tests/test_detector.py`` re-runs it to hold that. Weights that are a Hugging Face
+    Hub file also get the licence and references the Hub records for them, so the credit travels
+    with the labels.
+    """
     command = ["hbb2obb-detect", str(img_source) if img_source else "<img_source>"]
     if hbb_dir:
         command += ["--hbb_dir", str(hbb_dir)]
-    command += ["--model", model, "--imgsz", str(imgsz), "--conf", str(conf), "--iou", str(iou)]
-    if classes:
+    # A predictor argument that came through --model_kwargs is replayed there, and not also as its
+    # own flag, which hbb2obb-detect would refuse as a conflict.
+    from hbb2obb.utils import process_ultralytics_kwargs
+
+    passed_through = process_ultralytics_kwargs(model_kwargs)
+    command += ["--model", model]
+    for flag, value in (("imgsz", imgsz), ("conf", conf), ("iou", iou)):
+        if flag not in passed_through:
+            command += [f"--{flag}", str(value)]
+    if classes and "classes" not in passed_through:
         command += ["--classes", *[str(c) for c in classes]]
-    if device:
-        command += ["--device", device]
+    if class_map:
+        command += ["--class_map", class_map]
+    if max_det is not None and "max_det" not in passed_through:
+        command += ["--max_det", str(max_det)]
+    if device and "device" not in passed_through:
+        command += ["--device", str(device)]
     if merged_with:
         command += ["--merge_with", str(merged_with)]
+        if merge_iou is not None:
+            command += ["--merge_iou", str(merge_iou)]
     if normalize:
         command += ["--normalize"]
     if precision is not None:
         command += ["--precision", str(precision)]
+    if not save_confidence:
+        command += ["--no_confidence"]
     if model_kwargs:
         command += ["--model_kwargs", model_kwargs]
 
@@ -414,7 +485,7 @@ def write_detection_provenance(
         "",
         "Command that reproduces these annotations",
         RULE,
-        " ".join(command),
+        shlex.join(command),
         "",
         "Detection settings",
         RULE,
@@ -423,6 +494,9 @@ def write_detection_provenance(
         f"Confidence threshold     : {conf}",
         f"NMS IoU threshold        : {iou}",
         f"Classes kept             : {' '.join(str(c) for c in classes) if classes else 'all'}",
+        f"Class map                : {class_map if class_map else 'none, detector numbering'}",
+        f"Max detections per image : {max_det if max_det is not None else 'ultralytics default'}",
+        f"Confidence written       : {'6th column' if save_confidence else 'not written'}",
         f"Coordinates              : {coordinate_convention(normalize, precision)}",
         f"Inference device         : {device if device else 'ultralytics default'}",
     ]
@@ -431,6 +505,7 @@ def write_detection_provenance(
     if merged_with:
         lines += [
             f"Merged with              : {merged_with}",
+            f"Merge IoU                : {merge_iou if merge_iou is not None else 'not recorded'}",
             "  (the hand-drawn geometry was kept untouched; only confidences were attached)",
         ]
 
@@ -444,6 +519,8 @@ def write_detection_provenance(
     else:
         missing = True
         lines.append(f"    MISSING: {weights} does not exist, so no hash could be recorded")
+
+    lines += attribution_section(model)
 
     lines += environment_section()
     lines += ["", "Inputs and outputs", RULE, f"images         : {img_source if img_source else 'not recorded'}"]
@@ -471,7 +548,7 @@ def write_benchmark_provenance(
     gt_dir: Optional[Path],
     grid_description: str,
     elapsed_seconds: float,
-    models_dir: Path = Path("models"),
+    models_dir: Optional[Path] = None,
     notes: Sequence[str] = (),
 ) -> int:
     """
