@@ -8,7 +8,9 @@ Command-line interface for HBB2OBB.
 
 import argparse
 import json
+import sys
 from pathlib import Path
+from typing import Sequence
 
 from hbb2obb import __version__
 from hbb2obb.version_check import check_for_updates_once
@@ -107,6 +109,22 @@ def provenance_path(label_dir: Path, name: str = CONVERSION_PROVENANCE_NAME) -> 
     ``PROVENANCE_hbb.txt`` and the conversion ``PROVENANCE_obb.txt``, one name per set it names.
     """
     return label_dir.parent / name
+
+
+def fallback_share(totals: dict) -> float:
+    """The run's fallback share, 0.0 for a run that converted no boxes at all."""
+    return totals["fallbacks"] / totals["boxes"] if totals["boxes"] else 0.0
+
+
+def name_list(names: Sequence[str], limit: int = 10) -> str:
+    """
+    Name the frames, up to a limit, then say how many are left.
+
+    A run over a whole dataset can fail on hundreds of frames, and a summary that prints every
+    one of them buries the count that matters under the list.
+    """
+    shown = ", ".join(names[:limit])
+    return shown if len(names) <= limit else f"{shown}, and {len(names) - limit} more"
 
 
 def main_hbb2obb():
@@ -304,6 +322,29 @@ def main_hbb2obb():
     )
     parser.add_argument("--no_bar", "-nb", action="store_true", help="Disable tqdm progress bar display")
 
+    # A box whose mask SAM did not produce is written out as its own HBB. That is the right
+    # output, but a run that does it for a whole frame has gone wrong, and it used to say so
+    # nowhere at all.
+    fallback_group = parser.add_argument_group('fallback reporting')
+    fallback_group.add_argument(
+        "--fallback_warn_share",
+        "-fw",
+        type=float,
+        default=0.5,
+        metavar="SHARE",
+        help="Warn on stderr when more than this share of an image's boxes fall back to their HBB "
+        "(default: 0.5). 0 warns on any fallback, 1 disables the per-image warning.",
+    )
+    fallback_group.add_argument(
+        "--fail_on_fallback_share",
+        "-ff",
+        type=float,
+        default=None,
+        metavar="SHARE",
+        help="Exit non-zero when more than this share of the run's boxes fall back to their HBB. "
+        "The annotations and the provenance are written either way (default: exit 0 regardless).",
+    )
+
     args = parser.parse_args()
 
     check_for_updates_once()
@@ -321,6 +362,11 @@ def main_hbb2obb():
     )
     from hbb2obb.formats import image_size
     from hbb2obb.utils import get_hbb_dir, get_image_paths, process_ultralytics_kwargs
+
+    for name in ("fallback_warn_share", "fail_on_fallback_share"):
+        share = getattr(args, name)
+        if share is not None and not 0.0 <= share <= 1.0:
+            parser.error(f"--{name} is a share of the boxes, so it must be between 0 and 1, got {share}")
 
     # --precision only says how many decimals normalized coordinates get; absolute output is
     # integral and has none. Accepting it silently would look like it did something.
@@ -342,6 +388,8 @@ def main_hbb2obb():
     want_confidence = args.save_confidence or write_confidence_dir
 
     warned_precision = False
+    totals = {"boxes": 0, "fallbacks": 0}
+    wholly_fallen_back = []
     image_paths = get_image_paths(args.img_source)
     for img_path in tqdm.tqdm(image_paths, desc="Processing images", leave=True, disable=args.no_bar):
         result = hbb2obb(
@@ -365,13 +413,27 @@ def main_hbb2obb():
             return_confidence=want_confidence,
             confidence_source=args.confidence_source,
             return_contours=args.save_polygon,
+            return_stats=True,
             models_dir=args.models_dir,
         )
 
         # Unpack the extras hbb2obb() appends for the flags that were requested
-        obb_annotations, confidences, contours = unpack_results(
-            result, return_confidence=want_confidence, return_contours=args.save_polygon
+        obb_annotations, confidences, contours, stats = unpack_results(
+            result, return_confidence=want_confidence, return_contours=args.save_polygon, return_stats=True
         )
+
+        totals["boxes"] += stats.boxes
+        totals["fallbacks"] += stats.fallbacks
+        if stats.boxes and stats.fallbacks == stats.boxes:
+            wholly_fallen_back.append(img_path.name)
+        # tqdm.write rather than print: the bar is on stderr too, and a bare print through it
+        # leaves the warning interleaved with a half-drawn bar.
+        if stats.fallbacks and stats.share > args.fallback_warn_share:
+            tqdm.tqdm.write(
+                f"Warning: {stats.fallbacks} of {stats.boxes} boxes in {img_path.name} fell back to "
+                f"their HBB ({stats.share:.1%})",
+                file=sys.stderr,
+            )
 
         # The trailing column is written only when it was asked for by name; --confidence_dir on
         # its own leaves the label files with their standard nine fields.
@@ -410,10 +472,16 @@ def main_hbb2obb():
                 precision=precision,
             )
 
+    if image_paths:
+        obb_dir = resolve_output_dir(args.obb_dir, image_paths[0], "labels_obb")
+        print(f"\nWrote {totals['boxes']} boxes over {len(image_paths)} frames to {obb_dir}")
+        print(f"Fallback to HBB: {totals['fallbacks']} boxes ({fallback_share(totals):.2%})")
+        if wholly_fallen_back:
+            print(f"Fell back entirely: {len(wholly_fallen_back)} frame(s), {name_list(wholly_fallen_back)}")
+
     if args.save_provenance and image_paths:
         from hbb2obb import provenance
 
-        obb_dir = resolve_output_dir(args.obb_dir, image_paths[0], "labels_obb")
         provenance.write_conversion_provenance(
             out=provenance_path(obb_dir, CONVERSION_PROVENANCE_NAME),
             img_source=args.img_source,
@@ -432,6 +500,16 @@ def main_hbb2obb():
             save_confidence=args.save_confidence,
             confidence_dir=args.confidence_dir,
             models_dir=args.models_dir,
+            total_boxes=totals["boxes"],
+            fallback_boxes=totals["fallbacks"],
+        )
+
+    # Last, so the annotations, the side-cars and the record are all on disk either way: the
+    # exit code says the run is not fit to publish, not that it was abandoned.
+    if args.fail_on_fallback_share is not None and fallback_share(totals) > args.fail_on_fallback_share:
+        raise SystemExit(
+            f"{totals['fallbacks']} of {totals['boxes']} boxes ({fallback_share(totals):.2%}) fell back to "
+            f"their HBB, over the --fail_on_fallback_share of {args.fail_on_fallback_share:.2%}"
         )
 
 

@@ -193,6 +193,51 @@ def test_conversion_provenance_records_the_command_and_the_checkpoints(tmp_path)
     assert "HBB sha256" in text
 
 
+def conversion_record(tmp_path, **kwargs):
+    """A minimal conversion record, with only the fields under test spelled out."""
+    out = tmp_path / "PROVENANCE_obb.txt"
+    provenance.write_conversion_provenance(
+        out=out,
+        img_source=None,
+        hbb_dir=None,
+        obb_dir=tmp_path / "labels_obb",
+        sam_models=["sam_b"],
+        imgsz=1280,
+        scale_factors=[0.05],
+        opening_kernel_percentage=0.15,
+        fragment_ratio=0.1,
+        **kwargs,
+    )
+    return out.read_text()
+
+
+def test_conversion_provenance_records_what_fell_back(tmp_path):
+    """
+    The one thing in the record the run measured rather than was told. A release has to quote
+    it, and recovering it afterwards means reading every confidence side-car and knowing that a
+    0.0 is a fallback.
+    """
+    text = conversion_record(tmp_path, total_boxes=4245, fallback_boxes=31)
+    assert "OBB boxes      : 4245" in text
+    assert "HBB fallbacks  : 31 (0.73%)" in text
+
+
+def test_a_conversion_that_fell_back_nowhere_says_so_rather_than_staying_silent(tmp_path):
+    text = conversion_record(tmp_path, total_boxes=200, fallback_boxes=0)
+    assert "HBB fallbacks  : 0 (0.00%)" in text
+
+
+def test_a_record_written_without_them_is_the_one_that_always_was(tmp_path):
+    """They are never back-filled, so a caller that did not measure them writes the old block."""
+    text = conversion_record(tmp_path)
+    assert "OBB boxes" not in text
+    assert "HBB fallbacks" not in text
+
+
+def test_a_conversion_of_nothing_does_not_divide_by_zero(tmp_path):
+    assert "HBB fallbacks  : 0 (0.00%)" in conversion_record(tmp_path, total_boxes=0, fallback_boxes=0)
+
+
 def test_conversion_provenance_records_the_inference_device(tmp_path):
     out = tmp_path / "PROVENANCE.txt"
     provenance.write_conversion_provenance(

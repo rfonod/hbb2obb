@@ -9,6 +9,7 @@ import numpy as np
 import hbb2obb.converter as converter
 import hbb2obb.formats as formats
 from hbb2obb.converter import (
+    ConversionStats,
     aggregate_masks_by_majority_vote,
     clear_model_cache,
     create_obb_annotations_multi_model,
@@ -426,41 +427,73 @@ class TestSaveConfidenceRoundTrip(unittest.TestCase):
 
 
 class TestPackUnpackResults(unittest.TestCase):
-    """unpack_results() must invert pack_results() for every combination of the two flags,
+    """unpack_results() must invert pack_results() for every combination of the three flags,
     exactly as the CLI relies on, without either side hard-coding the other's append order."""
 
     def setUp(self):
         self.obb_annotations = np.array([[0, 100, 100, 300, 100, 300, 200, 100, 200]])
         self.confidences = [0.5]
         self.contours = [np.array([[100, 100]])]
+        self.stats = ConversionStats(boxes=1, fallbacks=0)
 
-    def _round_trip(self, return_confidence, return_contours):
-        packed = pack_results(self.obb_annotations, self.confidences, self.contours, return_confidence, return_contours)
-        return unpack_results(packed, return_confidence, return_contours)
+    def _round_trip(self, return_confidence, return_contours, return_stats=False):
+        packed = pack_results(
+            self.obb_annotations,
+            self.confidences,
+            self.contours,
+            self.stats,
+            return_confidence,
+            return_contours,
+            return_stats,
+        )
+        return unpack_results(packed, return_confidence, return_contours, return_stats)
 
     def test_neither_flag(self):
-        obb, confidences, contours = self._round_trip(False, False)
+        obb, confidences, contours, stats = self._round_trip(False, False)
         np.testing.assert_array_equal(obb, self.obb_annotations)
         self.assertIsNone(confidences)
         self.assertIsNone(contours)
+        self.assertIsNone(stats)
 
     def test_confidence_only(self):
-        obb, confidences, contours = self._round_trip(True, False)
+        obb, confidences, contours, stats = self._round_trip(True, False)
         np.testing.assert_array_equal(obb, self.obb_annotations)
         self.assertEqual(confidences, self.confidences)
         self.assertIsNone(contours)
+        self.assertIsNone(stats)
 
     def test_contours_only(self):
-        obb, confidences, contours = self._round_trip(False, True)
+        obb, confidences, contours, stats = self._round_trip(False, True)
         np.testing.assert_array_equal(obb, self.obb_annotations)
         self.assertIsNone(confidences)
         self.assertEqual(contours, self.contours)
+        self.assertIsNone(stats)
 
     def test_both_flags(self):
-        obb, confidences, contours = self._round_trip(True, True)
+        obb, confidences, contours, stats = self._round_trip(True, True)
         np.testing.assert_array_equal(obb, self.obb_annotations)
         self.assertEqual(confidences, self.confidences)
         self.assertEqual(contours, self.contours)
+        self.assertIsNone(stats)
+
+    def test_stats_only(self):
+        obb, confidences, contours, stats = self._round_trip(False, False, True)
+        np.testing.assert_array_equal(obb, self.obb_annotations)
+        self.assertIsNone(confidences)
+        self.assertIsNone(contours)
+        self.assertEqual(stats, self.stats)
+
+    def test_every_flag(self):
+        obb, confidences, contours, stats = self._round_trip(True, True, True)
+        np.testing.assert_array_equal(obb, self.obb_annotations)
+        self.assertEqual(confidences, self.confidences)
+        self.assertEqual(contours, self.contours)
+        self.assertEqual(stats, self.stats)
+
+    def test_the_stats_extra_comes_last(self):
+        """The append order is the contract; a caller reading the tuple by index depends on it."""
+        packed = pack_results(self.obb_annotations, self.confidences, self.contours, self.stats, True, True, True)
+        self.assertIs(packed[-1], self.stats)
 
 
 class TestMaskRetention(unittest.TestCase):
@@ -536,6 +569,19 @@ class TestTrimDeviceCache(unittest.TestCase):
     def test_no_device_at_all_is_not_an_error(self):
         converter.trim_device_cache(None)
         self.assertEqual(self.calls, [])
+
+
+class TestConversionStats(unittest.TestCase):
+    """The share is what the CLI thresholds on, so a frame with no boxes must not divide by zero."""
+
+    def test_share_of_a_mixed_frame(self):
+        self.assertAlmostEqual(ConversionStats(boxes=4, fallbacks=1).share, 0.25)
+
+    def test_a_frame_with_no_boxes_has_no_share(self):
+        self.assertEqual(ConversionStats(boxes=0, fallbacks=0).share, 0.0)
+
+    def test_a_frame_that_fell_back_entirely(self):
+        self.assertEqual(ConversionStats(boxes=7, fallbacks=7).share, 1.0)
 
 
 class TestResolveConfidences(unittest.TestCase):
