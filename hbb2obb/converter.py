@@ -66,12 +66,18 @@ def clear_model_cache() -> None:
     then meets a fragmented heap rather than an empty one, which is what stops a SAM image
     encoder from allocating the multi-gigabyte contiguous attention tensors it asks for. A
     benchmark clears the cache between runs precisely so the later, larger runs start clean.
+
+    Metal keeps freed blocks reserved the same way, so an Apple Silicon run needs the same
+    release; ``torch.mps`` is always importable and ``empty_cache()`` is a no-op where no
+    Metal device was ever used, so the branch costs nothing off that hardware.
     """
     import torch
 
     _MODEL_CACHE.clear()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
 
 
 def release_device_results(model: Any) -> None:
@@ -85,8 +91,44 @@ def release_device_results(model: Any) -> None:
     and an ensemble holds one such frame per member for as long as it is loaded.
     """
     predictor = getattr(model, "predictor", None)
-    if predictor is not None:
-        predictor.results = None
+    if predictor is None:
+        return
+    predictor.results = None
+    # What ultralytics' own reset_image() does. Both stay None on the prompted path, which only
+    # ever calls the model directly, but naming them here is what keeps that true: a version
+    # that starts caching the image embedding would otherwise pin an encoder output per member
+    # for as long as the model is loaded, and reuse it on the next frame.
+    for slot in ("im", "features"):
+        if getattr(predictor, slot, None) is not None:
+            setattr(predictor, slot, None)
+
+
+def trim_device_cache(device: Any) -> None:
+    """
+    Release the inference device's cached blocks between frames, on Metal only.
+
+    The caching allocator holds every block a frame reserved until the process ends, shaped
+    like that frame's box count. The next frame asks for differently shaped blocks, and on a
+    unified-memory Mac the reserved-but-unused remainder is real system memory: the machine
+    goes into memory compression while the process's own RSS stays small, and the per-frame
+    cost climbs through a directory rather than staying flat. Measured on 12 frames at
+    imgsz 1024, the driver held 15 GB after the first and 25 GB by the twelfth, and the
+    per-frame time went from 6 s to over 100 s; trimming keeps both flat.
+
+    CUDA is deliberately left to ``clear_model_cache``. A per-frame ``empty_cache()`` there
+    synchronizes the stream, which would move the ``execution_time`` of every optimizer run
+    ever measured, and no CUDA run has shown this growth.
+
+    Args:
+        device: The device inference ran on, as ultralytics resolved it (``predictor.device``),
+                or None when no model was called.
+    """
+    if getattr(device, "type", None) != "mps":
+        return
+
+    import torch
+
+    torch.mps.empty_cache()
 
 
 def hbb2obb(
@@ -182,6 +224,7 @@ def hbb2obb(
         # an explicit device in model_kwargs still wins.
         model_kwargs = {"device": device, **model_kwargs}
     masks_all_models = []
+    inference_device = None
 
     # Run each model and collect results
     for model_name in sam_models:
@@ -211,11 +254,19 @@ def hbb2obb(
         # gigabytes that the next model's image encoder needs for its own attention tensors.
         del result, results
         release_device_results(model)
+        inference_device = getattr(getattr(model, "predictor", None), "device", inference_device)
 
-    # Convert segmentation masks within HBBs to OBB annotations
+    # Hand the device's reserved blocks back before the contour pass rather than after it: the
+    # encoder activations are dead by now, and the pass that follows is the memory-hungry one.
+    trim_device_cache(inference_device)
+
+    # Convert segmentation masks within HBBs to OBB annotations. The masks are kept only when
+    # something will draw them; a frame of 76 objects at 3840x2160 is over half a gigabyte of
+    # full-frame bool array that a run without --save_img never looks at.
     obb_annotations, aggregated_masks, contours, confidences = create_obb_annotations_multi_model(
-        bbox_prompts, masks_all_models, opening_kernel_percentage, fragment_ratio
+        bbox_prompts, masks_all_models, opening_kernel_percentage, fragment_ratio, keep_masks=save_img
     )
+    del masks_all_models
 
     # Blend in the detector confidence from the HBB file, but only when a caller actually asked
     # for it: --confidence_source is documented as a no-op unless --save_confidence or
@@ -376,6 +427,7 @@ def create_obb_annotations_multi_model(
     masks_all_models: List[np.ndarray],
     opening_kernel_percentage: float,
     fragment_ratio: float = DEFAULT_FRAGMENT_RATIO,
+    keep_masks: bool = True,
 ) -> Tuple[np.ndarray, List[np.ndarray], List[np.ndarray], List[float]]:
     """
     Convert segmentation masks from multiple SAM models inside the HBBs to OBB annotations
@@ -395,11 +447,14 @@ def create_obb_annotations_multi_model(
                      negative closes, 0 disables it
         fragment_ratio: Minimum area, as a fraction of the largest contour's, for a second mask
                      piece to be fitted together with it; 0 or less fits the largest alone
+        keep_masks: Keep the aggregated mask of every object in the returned list. Only the
+                     visualization reads them, and each one is a full-frame boolean array, so a
+                     caller that will not draw them passes False and gets None in their place
 
     Returns:
         Tuple containing:
         - List of OBB annotations
-        - List of aggregated and HBB-cropped masks
+        - List of aggregated and HBB-cropped masks, or of None where keep_masks is False
         - List of contours
         - List of per-OBB confidence scores in [0, 1]
     """
@@ -427,7 +482,11 @@ def create_obb_annotations_multi_model(
                 # Calculate overlap between mask and bounding box
                 overlap = mask[y_min : y_max + 1, x_min : x_max + 1].sum()
                 if overlap > max_overlap:
-                    best_model_mask = mask.copy()
+                    # Referenced, not copied: nothing below writes through it. The aggregation
+                    # stacks and sums into fresh arrays, the union reduces into one, and the
+                    # crop works on a copy of its own. A copy here is a full frame of bool per
+                    # candidate that improves on the running best, for every box in the frame.
+                    best_model_mask = mask
                     max_overlap = overlap
 
             # If a valid mask was found, add it to the list
@@ -466,7 +525,7 @@ def create_obb_annotations_multi_model(
         aggregated_hbb_mask_final = apply_morphological_opening(aggregated_hbb_mask_cropped, opening_kernel_percentage)
 
         # Store the final mask
-        aggregated_masks.append(aggregated_hbb_mask_final)
+        aggregated_masks.append(aggregated_hbb_mask_final if keep_masks else None)
 
         # Find contours and minimum area rectangle
         hbb_contours, _ = cv2.findContours(

@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -462,6 +463,81 @@ class TestPackUnpackResults(unittest.TestCase):
         self.assertEqual(contours, self.contours)
 
 
+class TestMaskRetention(unittest.TestCase):
+    """
+    Only the visualization reads the aggregated masks, and each one is a full frame of bool.
+
+    A frame of 76 objects at 3840x2160 is over half a gigabyte of array that a run without
+    --save_img never looks at, held until the frame is finished. Mostly-False pages compress
+    almost perfectly, so the machine goes into memory compression while the process's own RSS
+    stays small, which is what the reported slowdown looked like from outside.
+    """
+
+    def setUp(self):
+        self.hbb_boxes = np.array([[0, 100, 100, 300, 200], [1, 400, 300, 500, 400]])
+        mask = np.zeros((480, 640), dtype=bool)
+        mask[120:180, 120:280] = True
+        self.masks = [[mask]]
+
+    def _masks_for(self, **kwargs):
+        return create_obb_annotations_multi_model(
+            self.hbb_boxes[0:1], self.masks, opening_kernel_percentage=0.0, **kwargs
+        )[1]
+
+    def test_the_default_keeps_them(self):
+        """What every direct caller and every shipped visualization has always got."""
+        kept = self._masks_for()
+        self.assertEqual(len(kept), 1)
+        self.assertIsInstance(kept[0], np.ndarray)
+
+    def test_a_caller_that_will_not_draw_them_gets_none_in_their_place(self):
+        dropped = self._masks_for(keep_masks=False)
+        self.assertEqual(dropped, [None], "the list stays row-aligned with the boxes")
+
+    def test_the_annotations_are_the_same_either_way(self):
+        args = (self.hbb_boxes[0:1], self.masks)
+        with_masks = create_obb_annotations_multi_model(*args, opening_kernel_percentage=0.0)
+        without = create_obb_annotations_multi_model(*args, opening_kernel_percentage=0.0, keep_masks=False)
+        np.testing.assert_array_equal(with_masks[0], without[0])
+        self.assertEqual(with_masks[3], without[3])
+
+    def test_the_prompt_masks_are_never_written_through(self):
+        """
+        The overlap search references the best mask rather than copying it, which is only safe
+        while nothing downstream mutates it.
+        """
+        before = self.masks[0][0].copy()
+        create_obb_annotations_multi_model(self.hbb_boxes[0:1], self.masks, opening_kernel_percentage=0.3)
+        np.testing.assert_array_equal(self.masks[0][0], before)
+
+
+class TestTrimDeviceCache(unittest.TestCase):
+    """The per-frame allocator trim is Metal's alone; CUDA keeps the between-run clear it had."""
+
+    def setUp(self):
+        import torch
+
+        self.torch = torch
+        self.calls = []
+        self._orig = torch.mps.empty_cache
+        torch.mps.empty_cache = lambda: self.calls.append(1)
+
+    def tearDown(self):
+        self.torch.mps.empty_cache = self._orig
+
+    def test_a_metal_device_is_trimmed(self):
+        converter.trim_device_cache(SimpleNamespace(type="mps"))
+        self.assertEqual(len(self.calls), 1)
+
+    def test_a_cuda_device_is_not(self):
+        converter.trim_device_cache(SimpleNamespace(type="cuda"))
+        self.assertEqual(self.calls, [])
+
+    def test_no_device_at_all_is_not_an_error(self):
+        converter.trim_device_cache(None)
+        self.assertEqual(self.calls, [])
+
+
 class TestResolveConfidences(unittest.TestCase):
     """Tests for picking which confidence score gets reported."""
 
@@ -816,6 +892,19 @@ class TestDeviceResultRelease(unittest.TestCase):
 
     def test_a_model_with_no_predictor_yet_is_not_an_error(self):
         converter.release_device_results(object())
+
+    def test_the_image_and_its_embedding_are_released_too(self):
+        """
+        Both stay None on the prompted path, which never calls set_image(). Naming them is what
+        keeps that true: a version that started caching the encoder output would otherwise pin
+        one per ensemble member for as long as the model is loaded, and reuse it next frame.
+        """
+        model = self._FakeModel(self._FakeMasks())
+        model.predictor.im = object()
+        model.predictor.features = object()
+        converter.release_device_results(model)
+        self.assertIsNone(model.predictor.im)
+        self.assertIsNone(model.predictor.features)
 
 
 if __name__ == "__main__":
