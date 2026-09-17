@@ -11,7 +11,7 @@
 - 🎯 **Accurate OBBs from HBBs**: prompts SAM-family segmentation models with your existing horizontal boxes to fit tight oriented boxes around non-upright objects, with no re-annotation required.
 - 🚗 **No HBBs? Detect them**: `hbb2obb-detect` runs an Ultralytics detector over your images and writes the horizontal boxes the conversion consumes, confidence column included ([details](#detecting-hbbs)).
 - 🧩 **Model ensemble**: combines masks from multiple SAM variants through majority voting for more robust, accurate results (see [Usage](#usage)).
-- 🛡️ **Spatially constrained & safe**: region-specific masking and contour refinement keep segmentation inside the object, a mask split by an occluder is fitted back together, and a fallback keeps the original HBB when no valid mask is found.
+- 🛡️ **Spatially constrained & safe**: region-specific masking and contour refinement keep segmentation inside the object, a mask split by an occluder is fitted back together, and a fallback keeps the original HBB when no valid mask is found, counted and reported rather than left to be discovered afterwards.
 - 🔎 **Confidence-scored output**: every OBB gets a quality score in `[0, 1]` that flags silent fallbacks and low-confidence conversions, so you know which boxes to trust; your detector's own confidence can be carried through instead of, or on top of, that score (see [Confidence scores](#confidence-scores)).
 - 📐 **Flexible scaling**: positive or negative scale factors (optionally different for the short and long sides) recover cropped object parts or tighten overly conservative annotations.
 - 📊 **Evaluate & optimize**: evaluation against ground truth on IoU, orientation error and the share of boxes above a high IoU bar, plus `hbb2obb-optimize`, a hyperparameter search over SAM inference resolution × scale factors × opening kernel, driven by a config file so a whole benchmark is one reproducible command ([details](#tuning-hyperparameters)).
@@ -33,7 +33,7 @@
 - **Evaluation tools**: assess OBB accuracy against ground truth on mean and median IoU, orientation error, and the share of matched boxes above IoU 0.5, 0.75, 0.85 and 0.9, overall and per class.
 - **Accuracy breakdown**: cut one evaluation by ground-truth orientation, size, frame edge, `difficult` flag and class, beside an identity baseline and the converted-to-reference side ratios, as a report, a YAML and a figure.
 - **Hyperparameter optimization**: search SAM inference resolutions, HBB scale factors and opening kernels for the best settings on your data, one sweep at a time or a whole benchmark from a config file.
-- **Provenance records**: `--save_provenance` writes the command, the versions, a digest of the source that ran and the SHA-256 of every checkpoint, so a released annotation set can be regenerated rather than trusted.
+- **Provenance records**: `--save_provenance` writes the command, the versions, a digest of the source that ran, the SHA-256 of every checkpoint and how many boxes fell back to their HBB, so a released annotation set can be regenerated rather than trusted.
 - **Visualization tools**: render HBBs, segmentation masks, derived contours, and resulting OBBs.
 - **Interactive viewer**: pan and zoom over annotated frames, toggle each layer, and compare two annotation sets side by side.
 - **Format conversion utilities**: convert between YOLO, DOTA, Pascal VOC, COCO and LabelMe annotations, in either direction, for both box kinds.
@@ -217,6 +217,8 @@ Run `hbb2obb --help` / `hbb2obb-eval --help` for the full list. Key conversion a
 - `--confidence_dir` / `-cd`: write those scores to their own directory instead, one score per line, row-aligned with the labels. Use it when the label files have to stay strictly standard, since Ultralytics and other YOLO OBB readers reject a 10th column. Give it bare for `img_source/../labels_confidence`.
 - `--save_img`, `--viz_dir`, `--show_confidence`, and `--hide_hbb` / `--hide_obb` / `--hide_masks` / `--hide_segments` / `--hide_class_labels`: visualization controls.
 - `--normalize` / `-n`: write the coordinates relative to `[0, 1]` instead of in absolute px, which is what Ultralytics reads. `--precision` / `-p` sets the decimals (default: 10). Applies to `--save_polygon` output too, so one run never mixes the two conventions.
+- `--fallback_warn_share` / `-fw`: warn on stderr when more than this share of an image's boxes fall back to their HBB (default: `0.5`). `0` warns on any fallback, `1` disables the per-image warning. Every run also ends with the total fallback count and share, and `--save_provenance` records both.
+- `--fail_on_fallback_share` / `-ff`: exit non-zero when more than this share of the run's boxes fall back. The annotations and the provenance are written either way (default: exit 0 regardless).
 - `--device`: inference device for the SAM model(s), e.g. `cpu`, `0`, `cuda:0`, `mps` (default: Ultralytics picks).
 - `--model_kwargs` / `-k`: any other Ultralytics inference arguments, passed through unchecked, as `key1=value1,key2=value2`; values are Python literals where they parse as one (`classes=[0, 2]`).
 - `--models_dir`: where checkpoints are read from and downloaded to (default: `HBB2OBB_MODELS_DIR` if set, else `models/`).
@@ -684,7 +686,7 @@ HBB2OBB fits each OBB by prompting SAM with your HBBs, refining the resulting ma
 4. **Mask aggregation**: with an ensemble, combine masks by majority voting; clip to the scaled HBB region; apply the signed morphological step (positive opens, negative closes).
 5. **Contour extraction**: take the largest contour of the refined mask, plus any other piece holding at least `--fragment_ratio` of its area, so a mask an occluder split is fitted as one object (optionally saved with `--save_polygon`).
 6. **OBB computation**: fit a minimum-area oriented bounding box.
-7. **Fallback**: if no valid mask is found inside an HBB, keep the original HBB as the OBB (confidence `0.0`).
+7. **Fallback**: if no valid mask is found inside an HBB, keep the original HBB as the OBB (confidence `0.0`). The run reports how many boxes this happened to, and names any image where it happened to more than `--fallback_warn_share` of them.
 8. **Confidence**: score each OBB in `[0, 1]` (see [Confidence Scores](#confidence-scores)).
 9. **Visualization (optional)**: overlay HBBs, masks, contours, and OBBs (colored by confidence).
 

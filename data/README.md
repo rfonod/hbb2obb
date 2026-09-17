@@ -113,6 +113,11 @@ Against the hand-drawn ground truth of step 5, the detector misses one motorcycl
 hbb2obb data/images --save_img --save_confidence --save_polygon --confidence_source combined
 ```
 
+```
+Wrote 201 boxes over 3 frames to data/labels_obb
+Fallback to HBB: 0 boxes (0.00%)
+```
+
 This writes `labels_obb/<frame>.txt` (with the confidence column), the `--save_img` overlays beside them, and `labels_polygon/<frame>.txt`. It uses the defaults otherwise: a single `sam_b` model, `--imgsz 1280`, `--scale_factors 0.05`, `--opening_kernel_percentage 0.15`, `--fragment_ratio 0.1`. Better results are available from a model ensemble and tuned hyperparameters, as described in the main README.
 
 `--confidence_source combined` multiplies the conversion quality by the detector confidence from step 1. Drop the flag for the `conversion` score alone, or pass `detector` for the input confidence alone; all three work here, since step 1 wrote that 6th column. [Confidence scores](../README.md#confidence-scores) in the main README explains what the score means and how to act on it.

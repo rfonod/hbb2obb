@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -8,6 +9,7 @@ import numpy as np
 import hbb2obb.converter as converter
 import hbb2obb.formats as formats
 from hbb2obb.converter import (
+    ConversionStats,
     aggregate_masks_by_majority_vote,
     clear_model_cache,
     create_obb_annotations_multi_model,
@@ -425,41 +427,161 @@ class TestSaveConfidenceRoundTrip(unittest.TestCase):
 
 
 class TestPackUnpackResults(unittest.TestCase):
-    """unpack_results() must invert pack_results() for every combination of the two flags,
+    """unpack_results() must invert pack_results() for every combination of the three flags,
     exactly as the CLI relies on, without either side hard-coding the other's append order."""
 
     def setUp(self):
         self.obb_annotations = np.array([[0, 100, 100, 300, 100, 300, 200, 100, 200]])
         self.confidences = [0.5]
         self.contours = [np.array([[100, 100]])]
+        self.stats = ConversionStats(boxes=1, fallbacks=0)
 
-    def _round_trip(self, return_confidence, return_contours):
-        packed = pack_results(self.obb_annotations, self.confidences, self.contours, return_confidence, return_contours)
-        return unpack_results(packed, return_confidence, return_contours)
+    def _round_trip(self, return_confidence, return_contours, return_stats=False):
+        packed = pack_results(
+            self.obb_annotations,
+            self.confidences,
+            self.contours,
+            self.stats,
+            return_confidence,
+            return_contours,
+            return_stats,
+        )
+        return unpack_results(packed, return_confidence, return_contours, return_stats)
 
     def test_neither_flag(self):
-        obb, confidences, contours = self._round_trip(False, False)
+        obb, confidences, contours, stats = self._round_trip(False, False)
         np.testing.assert_array_equal(obb, self.obb_annotations)
         self.assertIsNone(confidences)
         self.assertIsNone(contours)
+        self.assertIsNone(stats)
 
     def test_confidence_only(self):
-        obb, confidences, contours = self._round_trip(True, False)
+        obb, confidences, contours, stats = self._round_trip(True, False)
         np.testing.assert_array_equal(obb, self.obb_annotations)
         self.assertEqual(confidences, self.confidences)
         self.assertIsNone(contours)
+        self.assertIsNone(stats)
 
     def test_contours_only(self):
-        obb, confidences, contours = self._round_trip(False, True)
+        obb, confidences, contours, stats = self._round_trip(False, True)
         np.testing.assert_array_equal(obb, self.obb_annotations)
         self.assertIsNone(confidences)
         self.assertEqual(contours, self.contours)
+        self.assertIsNone(stats)
 
     def test_both_flags(self):
-        obb, confidences, contours = self._round_trip(True, True)
+        obb, confidences, contours, stats = self._round_trip(True, True)
         np.testing.assert_array_equal(obb, self.obb_annotations)
         self.assertEqual(confidences, self.confidences)
         self.assertEqual(contours, self.contours)
+        self.assertIsNone(stats)
+
+    def test_stats_only(self):
+        obb, confidences, contours, stats = self._round_trip(False, False, True)
+        np.testing.assert_array_equal(obb, self.obb_annotations)
+        self.assertIsNone(confidences)
+        self.assertIsNone(contours)
+        self.assertEqual(stats, self.stats)
+
+    def test_every_flag(self):
+        obb, confidences, contours, stats = self._round_trip(True, True, True)
+        np.testing.assert_array_equal(obb, self.obb_annotations)
+        self.assertEqual(confidences, self.confidences)
+        self.assertEqual(contours, self.contours)
+        self.assertEqual(stats, self.stats)
+
+    def test_the_stats_extra_comes_last(self):
+        """The append order is the contract; a caller reading the tuple by index depends on it."""
+        packed = pack_results(self.obb_annotations, self.confidences, self.contours, self.stats, True, True, True)
+        self.assertIs(packed[-1], self.stats)
+
+
+class TestMaskRetention(unittest.TestCase):
+    """
+    Only the visualization reads the aggregated masks, and each one is a full frame of bool.
+
+    A frame of 76 objects at 3840x2160 is over half a gigabyte of array that a run without
+    --save_img never looks at, held until the frame is finished. Mostly-False pages compress
+    almost perfectly, so the machine goes into memory compression while the process's own RSS
+    stays small, which is what the reported slowdown looked like from outside.
+    """
+
+    def setUp(self):
+        self.hbb_boxes = np.array([[0, 100, 100, 300, 200], [1, 400, 300, 500, 400]])
+        mask = np.zeros((480, 640), dtype=bool)
+        mask[120:180, 120:280] = True
+        self.masks = [[mask]]
+
+    def _masks_for(self, **kwargs):
+        return create_obb_annotations_multi_model(
+            self.hbb_boxes[0:1], self.masks, opening_kernel_percentage=0.0, **kwargs
+        )[1]
+
+    def test_the_default_keeps_them(self):
+        """What every direct caller and every shipped visualization has always got."""
+        kept = self._masks_for()
+        self.assertEqual(len(kept), 1)
+        self.assertIsInstance(kept[0], np.ndarray)
+
+    def test_a_caller_that_will_not_draw_them_gets_none_in_their_place(self):
+        dropped = self._masks_for(keep_masks=False)
+        self.assertEqual(dropped, [None], "the list stays row-aligned with the boxes")
+
+    def test_the_annotations_are_the_same_either_way(self):
+        args = (self.hbb_boxes[0:1], self.masks)
+        with_masks = create_obb_annotations_multi_model(*args, opening_kernel_percentage=0.0)
+        without = create_obb_annotations_multi_model(*args, opening_kernel_percentage=0.0, keep_masks=False)
+        np.testing.assert_array_equal(with_masks[0], without[0])
+        self.assertEqual(with_masks[3], without[3])
+
+    def test_the_prompt_masks_are_never_written_through(self):
+        """
+        The overlap search references the best mask rather than copying it, which is only safe
+        while nothing downstream mutates it.
+        """
+        before = self.masks[0][0].copy()
+        create_obb_annotations_multi_model(self.hbb_boxes[0:1], self.masks, opening_kernel_percentage=0.3)
+        np.testing.assert_array_equal(self.masks[0][0], before)
+
+
+class TestTrimDeviceCache(unittest.TestCase):
+    """The per-frame allocator trim is Metal's alone; CUDA keeps the between-run clear it had."""
+
+    def setUp(self):
+        import torch
+
+        self.torch = torch
+        self.calls = []
+        self._orig = torch.mps.empty_cache
+        torch.mps.empty_cache = lambda: self.calls.append(1)
+
+    def tearDown(self):
+        self.torch.mps.empty_cache = self._orig
+
+    def test_a_metal_device_is_trimmed(self):
+        converter.trim_device_cache(SimpleNamespace(type="mps"))
+        self.assertEqual(len(self.calls), 1)
+
+    def test_a_cuda_device_is_not(self):
+        converter.trim_device_cache(SimpleNamespace(type="cuda"))
+        self.assertEqual(self.calls, [])
+
+    def test_no_device_at_all_is_not_an_error(self):
+        converter.trim_device_cache(None)
+        self.assertEqual(self.calls, [])
+
+
+class TestConversionStats(unittest.TestCase):
+    """The share is what the CLI thresholds on, so a frame with no boxes must not divide by zero."""
+
+    def test_share_of_a_mixed_frame(self):
+        self.assertAlmostEqual(ConversionStats(boxes=4, fallbacks=1).share, 0.25)
+
+    def test_a_frame_with_no_boxes_has_no_share(self):
+        self.assertEqual(ConversionStats(boxes=0, fallbacks=0).share, 0.0)
+
+    def test_a_frame_that_fell_back_entirely(self):
+        self.assertEqual(ConversionStats(boxes=7, fallbacks=7).share, 1.0)
 
 
 class TestResolveConfidences(unittest.TestCase):
@@ -816,6 +938,19 @@ class TestDeviceResultRelease(unittest.TestCase):
 
     def test_a_model_with_no_predictor_yet_is_not_an_error(self):
         converter.release_device_results(object())
+
+    def test_the_image_and_its_embedding_are_released_too(self):
+        """
+        Both stay None on the prompted path, which never calls set_image(). Naming them is what
+        keeps that true: a version that started caching the encoder output would otherwise pin
+        one per ensemble member for as long as the model is loaded, and reuse it next frame.
+        """
+        model = self._FakeModel(self._FakeMasks())
+        model.predictor.im = object()
+        model.predictor.features = object()
+        converter.release_device_results(model)
+        self.assertIsNone(model.predictor.im)
+        self.assertIsNone(model.predictor.features)
 
 
 if __name__ == "__main__":

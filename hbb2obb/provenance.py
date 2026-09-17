@@ -298,8 +298,19 @@ def write_conversion_provenance(
     precision: Optional[int] = None,
     save_confidence: bool = False,
     confidence_dir: Optional[str] = None,
+    total_boxes: Optional[int] = None,
+    fallback_boxes: Optional[int] = None,
 ) -> int:
-    """Record the settings an `hbb2obb` conversion actually ran with."""
+    """
+    Record the settings an `hbb2obb` conversion actually ran with.
+
+    ``total_boxes`` and ``fallback_boxes`` are the one thing here the run measured rather than
+    was told: how many boxes came out, and how many of them are the source HBB emitted unchanged
+    because no usable mask was found. A release has to quote that number, and recovering it
+    afterwards means reading every confidence side-car and knowing that a 0.0 means a fallback.
+    Both absent writes the block exactly as it was before they existed; neither is ever
+    back-filled by anything but the run that produced the labels.
+    """
     command = ["hbb2obb", str(img_source) if img_source else "<img_source>"]
     if hbb_dir:
         command += ["--hbb_dir", str(hbb_dir)]
@@ -368,6 +379,11 @@ def write_conversion_provenance(
     lines.append(f"OBB labels     : {obb_dir if obb_dir else 'not recorded'}")
     if obb_dir:
         lines.append(f"OBB count      : {count(obb_dir, '*.txt')} .txt files")
+    if total_boxes is not None:
+        lines.append(f"OBB boxes      : {total_boxes}")
+    if fallback_boxes is not None:
+        share = fallback_boxes / total_boxes if total_boxes else 0.0
+        lines.append(f"HBB fallbacks  : {fallback_boxes} ({share:.2%})")
 
     if notes:
         lines += ["", "Notes", RULE] + list(notes)

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 # Author: Robert Fonod (robert.fonod@ieee.org)
 
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -27,6 +29,32 @@ DEFAULT_NORMALIZED_PRECISION = formats.DEFAULT_NORMALIZED_PRECISION
 # Vision OBB tuning set a piece this large appears on 8 boxes in 4245 and is a genuine part of
 # the vehicle every time; below this floor the pieces are neighbours and noise.
 DEFAULT_FRAGMENT_RATIO = 0.1
+
+
+@dataclass(frozen=True)
+class ConversionStats:
+    """
+    What one frame's conversion produced, as opposed to what it was asked to produce.
+
+    A fallback box is one where no usable mask or contour was found and the source HBB was
+    emitted unchanged. It is recoverable afterwards only from a 0.0 confidence, and only when
+    the scores were written and ``--confidence_source`` left them alone, so a run that reports
+    nothing leaves a dataset release recomputing a number it should have been handed.
+
+    ``masks_missing`` counts prompts that came back without a mask of their own: ultralytics
+    drops a SAM mask whose predicted IoU is below ``conf``, so a model can return fewer masks
+    than it was given boxes without returning none at all. That is the case a whole frame of
+    fallbacks looks like from the inside, and nothing used to say it had happened.
+    """
+
+    boxes: int
+    fallbacks: int
+    masks_missing: int = 0
+
+    @property
+    def share(self) -> float:
+        """Fraction of this frame's boxes that fell back, 0.0 for a frame with no boxes."""
+        return self.fallbacks / self.boxes if self.boxes else 0.0
 
 
 def sam_checkpoint_path(model_name: str, models_dir: Optional[Path] = None) -> Path:
@@ -66,12 +94,18 @@ def clear_model_cache() -> None:
     then meets a fragmented heap rather than an empty one, which is what stops a SAM image
     encoder from allocating the multi-gigabyte contiguous attention tensors it asks for. A
     benchmark clears the cache between runs precisely so the later, larger runs start clean.
+
+    Metal keeps freed blocks reserved the same way, so an Apple Silicon run needs the same
+    release; ``torch.mps`` is always importable and ``empty_cache()`` is a no-op where no
+    Metal device was ever used, so the branch costs nothing off that hardware.
     """
     import torch
 
     _MODEL_CACHE.clear()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
 
 
 def release_device_results(model: Any) -> None:
@@ -85,8 +119,42 @@ def release_device_results(model: Any) -> None:
     and an ensemble holds one such frame per member for as long as it is loaded.
     """
     predictor = getattr(model, "predictor", None)
-    if predictor is not None:
-        predictor.results = None
+    if predictor is None:
+        return
+    predictor.results = None
+    # What ultralytics' own reset_image() does. Both stay None on the prompted path, which only
+    # ever calls the model directly, but naming them here is what keeps that true: a version
+    # that starts caching the image embedding would otherwise pin an encoder output per member
+    # for as long as the model is loaded, and reuse it on the next frame.
+    for slot in ("im", "features"):
+        if getattr(predictor, slot, None) is not None:
+            setattr(predictor, slot, None)
+
+
+def trim_device_cache(device: Any) -> None:
+    """
+    Release the inference device's cached blocks between frames, on Metal only.
+
+    The caching allocator holds every block a frame reserved until the process ends, shaped
+    like that frame's box count. The next frame asks for differently shaped blocks, and on a
+    unified-memory Mac the reserved-but-unused remainder is real system memory: the machine
+    goes into memory compression while the process's own RSS stays small, and the per-frame
+    cost climbs through a directory rather than staying flat.
+
+    CUDA is deliberately left to ``clear_model_cache``. A per-frame ``empty_cache()`` there
+    synchronizes the stream, which would move the ``execution_time`` of every optimizer run
+    ever measured, and no CUDA run has shown this growth.
+
+    Args:
+        device: The device inference ran on, as ultralytics resolved it (``predictor.device``),
+                or None when no model was called.
+    """
+    if getattr(device, "type", None) != "mps":
+        return
+
+    import torch
+
+    torch.mps.empty_cache()
 
 
 def hbb2obb(
@@ -110,6 +178,7 @@ def hbb2obb(
     return_confidence: bool = False,
     confidence_source: str = "conversion",
     return_contours: bool = False,
+    return_stats: bool = False,
     models_dir: Optional[Path] = None,
 ) -> Union[np.ndarray, Tuple]:
     """
@@ -146,15 +215,13 @@ def hbb2obb(
                      from the HBB input file), or 'combined' (their product)
         return_contours: If True, also return the per-object segmentation contours, in absolute
                      image pixel coordinates, with None where the OBB is a fallback HBB
+        return_stats: If True, also return a ``ConversionStats`` for this frame
         models_dir: Checkpoint directory (default: ``$HBB2OBB_MODELS_DIR``, else ``models``)
 
     Returns:
-        OBB annotations as a numpy array, with the requested extras appended in a tuple:
-
-        - neither flag: obb_annotations
-        - return_confidence: (obb_annotations, confidences)
-        - return_contours: (obb_annotations, contours)
-        - both flags: (obb_annotations, confidences, contours)
+        OBB annotations as a numpy array, with the requested extras appended in a tuple, in the
+        order confidences, contours, stats. With no flag set, the array alone; with every flag,
+        ``(obb_annotations, confidences, contours, stats)``.
 
         The confidences and contours lists are always the same length as obb_annotations.
     """
@@ -169,7 +236,8 @@ def hbb2obb(
 
     # Nothing to convert: SAM cannot be prompted with zero boxes
     if len(bbox_prompts) == 0:
-        return pack_results(np.array([]), [], [], return_confidence, return_contours)
+        empty = ConversionStats(boxes=0, fallbacks=0)
+        return pack_results(np.array([]), [], [], empty, return_confidence, return_contours, return_stats)
 
     # Convert single model to list for consistent processing
     if isinstance(sam_models, str):
@@ -182,6 +250,8 @@ def hbb2obb(
         # an explicit device in model_kwargs still wins.
         model_kwargs = {"device": device, **model_kwargs}
     masks_all_models = []
+    masks_missing = 0
+    inference_device = None
 
     # Run each model and collect results
     for model_name in sam_models:
@@ -202,8 +272,21 @@ def hbb2obb(
         if result.masks is not None:
             masks = result.masks.cpu().numpy()
             masks_all_models.append(masks.data)
+            # Ultralytics drops any SAM mask whose predicted IoU is below `conf`, so a model can
+            # answer a prompt set with fewer masks than it was given boxes and still not answer
+            # with none. Every box left without a mask of its own falls back to its HBB, which
+            # used to happen in silence: `result.masks` is a zero-length Masks object in that
+            # case, not None, so the warning below never fired however many boxes were lost.
+            shortfall = len(bbox_prompts) - len(masks.data)
+            if shortfall > 0:
+                masks_missing = max(masks_missing, shortfall)
+                print(
+                    f"Warning: model {model_name} returned {len(masks.data)} mask(s) for "
+                    f"{len(bbox_prompts)} prompt(s) in {img_path.name}",
+                    file=sys.stderr,
+                )
         else:
-            print(f"Warning: Model {model_name} produced no masks for {img_path.name}")
+            print(f"Warning: Model {model_name} produced no masks for {img_path.name}", file=sys.stderr)
 
         # The masks now live on the host, so release the device copies before prompting the next
         # model rather than at the end of the loop: an ensemble sweep keeps every member loaded
@@ -211,10 +294,24 @@ def hbb2obb(
         # gigabytes that the next model's image encoder needs for its own attention tensors.
         del result, results
         release_device_results(model)
+        inference_device = getattr(getattr(model, "predictor", None), "device", inference_device)
 
-    # Convert segmentation masks within HBBs to OBB annotations
+    # Hand the device's reserved blocks back before the contour pass rather than after it: the
+    # encoder activations are dead by now, and the pass that follows is the memory-hungry one.
+    trim_device_cache(inference_device)
+
+    # Convert segmentation masks within HBBs to OBB annotations. The masks are kept only when
+    # something will draw them; a frame of 76 objects at 3840x2160 is over half a gigabyte of
+    # full-frame bool array that a run without --save_img never looks at.
     obb_annotations, aggregated_masks, contours, confidences = create_obb_annotations_multi_model(
-        bbox_prompts, masks_all_models, opening_kernel_percentage, fragment_ratio
+        bbox_prompts, masks_all_models, opening_kernel_percentage, fragment_ratio, keep_masks=save_img
+    )
+    del masks_all_models
+
+    stats = ConversionStats(
+        boxes=len(contours),
+        fallbacks=sum(c is None for c in contours),
+        masks_missing=masks_missing,
     )
 
     # Blend in the detector confidence from the HBB file, but only when a caller actually asked
@@ -243,47 +340,52 @@ def hbb2obb(
             show_confidence=show_confidence,
         )
 
-    return pack_results(obb_annotations, confidences, contours, return_confidence, return_contours)
+    return pack_results(obb_annotations, confidences, contours, stats, return_confidence, return_contours, return_stats)
 
 
 def pack_results(
     obb_annotations: np.ndarray,
     confidences: List[float],
     contours: List[np.ndarray],
+    stats: "ConversionStats",
     return_confidence: bool,
     return_contours: bool,
+    return_stats: bool = False,
 ) -> Union[np.ndarray, Tuple]:
     """
     Append the optionally requested extras to the OBB annotations, in a fixed order
-    (confidences before contours). Pair with `unpack_results()`, which mirrors this same
-    order, rather than reconstructing it by hand at the call site.
+    (confidences, then contours, then stats). Pair with `unpack_results()`, which mirrors this
+    same order, rather than reconstructing it by hand at the call site.
     """
-    if not return_confidence and not return_contours:
-        return obb_annotations
-
     extras = []
     if return_confidence:
         extras.append(confidences)
     if return_contours:
         extras.append(contours)
+    if return_stats:
+        extras.append(stats)
 
-    return (obb_annotations, *extras)
+    return (obb_annotations, *extras) if extras else obb_annotations
 
 
 def unpack_results(
-    result: Union[np.ndarray, Tuple], return_confidence: bool, return_contours: bool
-) -> Tuple[np.ndarray, Union[List[float], None], Union[List[np.ndarray], None]]:
+    result: Union[np.ndarray, Tuple],
+    return_confidence: bool,
+    return_contours: bool,
+    return_stats: bool = False,
+) -> Tuple[np.ndarray, Union[List[float], None], Union[List[np.ndarray], None], Optional["ConversionStats"]]:
     """
-    Inverse of `pack_results()`: recover (obb_annotations, confidences, contours) from a
-    `hbb2obb()` return value, given the same `return_confidence`/`return_contours` flags that
-    were passed to produce it. `confidences`/`contours` are None for extras that were not
-    requested, rather than the caller having to know pack_results()'s append order.
+    Inverse of `pack_results()`: recover (obb_annotations, confidences, contours, stats) from a
+    `hbb2obb()` return value, given the same `return_*` flags that were passed to produce it.
+    Each extra is None where it was not requested, rather than the caller having to know
+    pack_results()'s append order.
     """
     values = list(result) if isinstance(result, tuple) else [result]
     obb_annotations = values.pop(0)
     confidences = values.pop(0) if return_confidence else None
     contours = values.pop(0) if return_contours else None
-    return obb_annotations, confidences, contours
+    stats = values.pop(0) if return_stats else None
+    return obb_annotations, confidences, contours, stats
 
 
 def resolve_confidences(
@@ -376,6 +478,7 @@ def create_obb_annotations_multi_model(
     masks_all_models: List[np.ndarray],
     opening_kernel_percentage: float,
     fragment_ratio: float = DEFAULT_FRAGMENT_RATIO,
+    keep_masks: bool = True,
 ) -> Tuple[np.ndarray, List[np.ndarray], List[np.ndarray], List[float]]:
     """
     Convert segmentation masks from multiple SAM models inside the HBBs to OBB annotations
@@ -395,11 +498,14 @@ def create_obb_annotations_multi_model(
                      negative closes, 0 disables it
         fragment_ratio: Minimum area, as a fraction of the largest contour's, for a second mask
                      piece to be fitted together with it; 0 or less fits the largest alone
+        keep_masks: Keep the aggregated mask of every object in the returned list. Only the
+                     visualization reads them, and each one is a full-frame boolean array, so a
+                     caller that will not draw them passes False and gets None in their place
 
     Returns:
         Tuple containing:
         - List of OBB annotations
-        - List of aggregated and HBB-cropped masks
+        - List of aggregated and HBB-cropped masks, or of None where keep_masks is False
         - List of contours
         - List of per-OBB confidence scores in [0, 1]
     """
@@ -427,7 +533,11 @@ def create_obb_annotations_multi_model(
                 # Calculate overlap between mask and bounding box
                 overlap = mask[y_min : y_max + 1, x_min : x_max + 1].sum()
                 if overlap > max_overlap:
-                    best_model_mask = mask.copy()
+                    # Referenced, not copied: nothing below writes through it. The aggregation
+                    # stacks and sums into fresh arrays, the union reduces into one, and the
+                    # crop works on a copy of its own. A copy here is a full frame of bool per
+                    # candidate that improves on the running best, for every box in the frame.
+                    best_model_mask = mask
                     max_overlap = overlap
 
             # If a valid mask was found, add it to the list
@@ -466,7 +576,7 @@ def create_obb_annotations_multi_model(
         aggregated_hbb_mask_final = apply_morphological_opening(aggregated_hbb_mask_cropped, opening_kernel_percentage)
 
         # Store the final mask
-        aggregated_masks.append(aggregated_hbb_mask_final)
+        aggregated_masks.append(aggregated_hbb_mask_final if keep_masks else None)
 
         # Find contours and minimum area rectangle
         hbb_contours, _ = cv2.findContours(
