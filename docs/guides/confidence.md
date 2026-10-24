@@ -1,6 +1,6 @@
 # Confidence scores
 
-Each OBB can carry a score in `[0, 1]` for triaging a converted dataset: high scores are tight SAM fits, low scores are worth a look, and `0.0` marks a [fallback](how-it-works.md#fallback) where the scaled HBB was kept. The score is a heuristic for ranking boxes, not a calibrated probability.
+Each OBB can carry a score in `[0, 1]` for triaging a converted dataset: high scores are tight SAM fits, low scores are worth a look, and `0.0` marks a [fallback](how-it-works.md#fallback) where the HBB was kept. The score is a heuristic for ranking boxes, not a calibrated probability.
 
 ![Confidence-scored OBBs](https://raw.githubusercontent.com/rfonod/hbb2obb/main/assets/hbb2obb_confidence_scores.jpg)
 

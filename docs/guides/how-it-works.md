@@ -11,7 +11,7 @@ flowchart LR
     E --> F[Open or close]
     F --> G[Contours]
     G --> H[Rotated box]
-    G -. no usable mask .-> I[Fallback:<br>scaled HBB]
+    G -. no usable mask .-> I[Fallback:<br>the HBB]
 ```
 
 The steps below name the flag that controls each one. The defaults are those of the `hbb2obb` command.
@@ -72,7 +72,7 @@ The outer contours of the mask are found, and one is **valid** when its area is 
 
 ## Fallback
 
-When no model produced a mask overlapping the scaled box, or no contour is valid, the OBB is the **scaled box itself**: axis-aligned, with confidence `0.0`, and with no contour behind it. Its polygon line, under `--save_polygon`, is the same rectangle.
+When no model produced a mask overlapping the scaled box, or no contour is valid, the OBB is the **HBB as read**, before scaling, in whole pixels: axis-aligned, with confidence `0.0`, and with no contour behind it. Its polygon line, under `--save_polygon`, is the same rectangle.
 
 The run ends with the number and share of boxes that fell back:
 

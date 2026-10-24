@@ -33,7 +33,7 @@
 
 ## Many boxes fall back
 
-A fallback is a box for which no usable mask was found; it is written as its scaled HBB with confidence `0.0`. See [Fallback](how-it-works.md#fallback). To find the cause, convert a few frames with `--save_img` and look at the overlays.
+A fallback is a box for which no usable mask was found; it is written as its HBB with confidence `0.0`. See [Fallback](how-it-works.md#fallback). To find the cause, convert a few frames with `--save_img` and look at the overlays.
 
 - **`Warning: model sam_b returned 40 mask(s) for 56 prompt(s) in 0001.jpg`**: Ultralytics dropped masks below its quality threshold. `--model_kwargs conf=0.1` lowers it from the default 0.25.
 - **Prompts too tight**: a mask must cover at least 10% of its scaled box. A negative `--scale_factors` shrinks the prompt and can cut the object off; try the default `0.05`.

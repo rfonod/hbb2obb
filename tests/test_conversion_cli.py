@@ -188,6 +188,19 @@ def test_an_image_that_falls_back_entirely_is_named_on_stderr(tmp_path, monkeypa
     assert "Fell back entirely: 1 frame(s), frame00.jpg" in captured.out
 
 
+def test_a_box_that_falls_back_is_written_as_its_original_hbb(tmp_path, monkeypatch, metal):
+    """Not as the prompt, which the default scale factor of 0.05 enlarges by 5% of each side per edge."""
+    model = FakeSAM(drop_after=3)  # the last of the four boxes gets no mask
+    monkeypatch.setattr(converter, "load_sam_model", lambda *_args, **_kwargs: model)
+    images = make_frames(tmp_path, [FOUR_BOXES])
+
+    assert run(monkeypatch, images) == 0
+    last = (tmp_path / "labels_obb" / "frame00.txt").read_text().splitlines()[-1]
+    xc, yc, w, h = FOUR_BOXES[-1]
+    x1, y1, x2, y2 = xc - w // 2, yc - h // 2, xc + w // 2, yc + h // 2
+    assert last.split() == [str(v) for v in (0, x1, y1, x2, y1, x2, y2, x1, y2)]
+
+
 def test_the_fallback_warning_respects_its_threshold(tmp_path, monkeypatch, metal, capsys):
     model = FakeSAM(drop_after=3)  # one box of four falls back, a share of 0.25
     monkeypatch.setattr(converter, "load_sam_model", lambda *_args, **_kwargs: model)

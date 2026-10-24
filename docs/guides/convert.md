@@ -90,7 +90,7 @@ The best values depend on the data. [Tune hyperparameters](optimize.md) searches
 
 ## Fallbacks
 
-A box with no usable mask is written as its scaled HBB, with confidence `0.0`; see [Fallback](how-it-works.md#fallback). Every run ends with the total:
+A box with no usable mask is written as its HBB, unscaled, with confidence `0.0`; see [Fallback](how-it-works.md#fallback). Every run ends with the total:
 
 ```text
 Wrote 201 boxes over 3 frames to data/labels_obb

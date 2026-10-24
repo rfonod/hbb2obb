@@ -11,7 +11,7 @@
 - 🎯 **Accurate OBBs from HBBs**: prompts SAM-family segmentation models with your existing horizontal boxes to fit tight oriented boxes around non-upright objects, with no re-annotation required.
 - 🚗 **No HBBs? Detect them**: `hbb2obb-detect` runs an Ultralytics detector over your images and writes the horizontal boxes the conversion consumes, confidence column included ([details](#detecting-hbbs)).
 - 🧩 **Model ensemble**: combines masks from multiple SAM variants through majority voting for more robust, accurate results (see [Usage](#usage)).
-- 🛡️ **Spatially constrained & safe**: region-specific masking and contour refinement keep segmentation inside the object, a mask split by an occluder is fitted back together, and a fallback keeps the HBB when no valid mask is found, counted and reported rather than left to be discovered afterwards.
+- 🛡️ **Spatially constrained & safe**: region-specific masking and contour refinement keep segmentation inside the object, a mask split by an occluder is fitted back together, and a fallback keeps the original HBB when no valid mask is found, counted and reported rather than left to be discovered afterwards.
 - 🔎 **Confidence-scored output**: every OBB gets a quality score in `[0, 1]` that flags silent fallbacks and low-confidence conversions, so you know which boxes to trust; your detector's own confidence can be carried through instead of, or on top of, that score (see [Confidence scores](#confidence-scores)).
 - 📐 **Flexible scaling**: positive or negative scale factors (optionally different for the short and long sides) recover cropped object parts or tighten overly conservative annotations.
 - 📊 **Evaluate & optimize**: evaluation against ground truth on IoU, orientation error and the share of boxes above a high IoU bar, plus `hbb2obb-optimize`, a hyperparameter search over SAM inference resolution × scale factors × opening kernel, driven by a config file so a whole benchmark is one reproducible command ([details](#tuning-hyperparameters)).
@@ -334,11 +334,11 @@ With `--save_polygon`, the segmentation contour behind each OBB goes to a parall
 
 ## How It Works
 
-HBB2OBB fits each OBB by prompting SAM with your HBBs, combining the masks of an ensemble by majority vote, clipping the mask to the scaled HBB, refining it with a signed morphological kernel, and wrapping its largest contour (plus any piece of the same object an occluder split off) in a minimum-area rotated box. If no valid mask is found inside an HBB, the HBB is kept, and the run reports how many boxes this happened to. OBBs inherit the class of their source HBB. [How the conversion works](https://rfonod.github.io/hbb2obb/guides/how-it-works/) describes each step.
+HBB2OBB fits each OBB by prompting SAM with your HBBs, combining the masks of an ensemble by majority vote, clipping the mask to the scaled HBB, refining it with a signed morphological kernel, and wrapping its largest contour (plus any piece of the same object an occluder split off) in a minimum-area rotated box. If no valid mask is found inside an HBB, the original HBB is kept, and the run reports how many boxes this happened to. OBBs inherit the class of their source HBB. [How the conversion works](https://rfonod.github.io/hbb2obb/guides/how-it-works/) describes each step.
 
 ## Confidence Scores
 
-Each OBB carries a heuristic quality score in `[0, 1]` that helps triage a converted dataset: high scores are trustworthy SAM fits, low scores warrant a look, and `0.0` marks a fallback to the HBB. The detail crop below shows the score that `--show_confidence` prints next to each converted box.
+Each OBB carries a heuristic quality score in `[0, 1]` that helps triage a converted dataset: high scores are trustworthy SAM fits, low scores warrant a look, and `0.0` marks a fallback where the original HBB was kept. The detail crop below shows the score that `--show_confidence` prints next to each converted box.
 
 ![Confidence-scored OBBs](https://raw.githubusercontent.com/rfonod/hbb2obb/main/assets/hbb2obb_confidence_scores.jpg)
 

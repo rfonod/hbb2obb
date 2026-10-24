@@ -304,7 +304,12 @@ def hbb2obb(
     # something will draw them; a frame of 76 objects at 3840x2160 is over half a gigabyte of
     # full-frame bool array that a run without --save_img never looks at.
     obb_annotations, aggregated_masks, contours, confidences = create_obb_annotations_multi_model(
-        bbox_prompts, masks_all_models, opening_kernel_percentage, fragment_ratio, keep_masks=save_img
+        bbox_prompts,
+        masks_all_models,
+        opening_kernel_percentage,
+        fragment_ratio,
+        keep_masks=save_img,
+        fallback_boxes=annotations.hbb_xyxy,
     )
     del masks_all_models
 
@@ -473,12 +478,22 @@ def merge_fragment_contours(
     return [largest] + [c for c in contours if c is not largest and cv2.contourArea(c) >= floor]
 
 
+def hbb_corners(box: Sequence[float]) -> List[int]:
+    """
+    The four corners of a ``label, x1, y1, x2, y2`` box, clockwise from the top left, rounded to
+    whole pixels: the fallback OBB of a box with no usable mask.
+    """
+    _, x1, y1, x2, y2 = (int(round(float(v))) for v in box)
+    return [x1, y1, x2, y1, x2, y2, x1, y2]
+
+
 def create_obb_annotations_multi_model(
     hbb_boxes: np.ndarray,
     masks_all_models: List[np.ndarray],
     opening_kernel_percentage: float,
     fragment_ratio: float = DEFAULT_FRAGMENT_RATIO,
     keep_masks: bool = True,
+    fallback_boxes: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, List[np.ndarray], List[np.ndarray], List[float]]:
     """
     Convert segmentation masks from multiple SAM models inside the HBBs to OBB annotations
@@ -501,6 +516,9 @@ def create_obb_annotations_multi_model(
         keep_masks: Keep the aggregated mask of every object in the returned list. Only the
                      visualization reads them, and each one is a full-frame boolean array, so a
                      caller that will not draw them passes False and gets None in their place
+        fallback_boxes: The HBBs as read, before scaling, row for row with ``hbb_boxes``. A box
+                     with no usable mask is emitted as its row here, rounded to whole pixels;
+                     without it, as its row of ``hbb_boxes``
 
     Returns:
         Tuple containing:
@@ -514,8 +532,12 @@ def create_obb_annotations_multi_model(
     contours = []
     confidences = []
 
-    for hbb_box in hbb_boxes:
+    if fallback_boxes is None:
+        fallback_boxes = hbb_boxes
+
+    for hbb_box, fallback_box in zip(hbb_boxes, fallback_boxes):
         label, xmin, ymin, xmax, ymax = hbb_box
+        fallback_points = hbb_corners(fallback_box)
 
         # Convert to integers for mask indexing
         x_min, y_min = max(0, int(xmin)), max(0, int(ymin))
@@ -544,10 +566,9 @@ def create_obb_annotations_multi_model(
             if best_model_mask is not None and max_overlap > 0:
                 best_hbb_masks.append(best_model_mask)
 
-        # If no valid masks were found, use the HBB as OBB (fallback -> zero confidence)
+        # If no valid masks were found, emit the HBB as read (fallback -> zero confidence)
         if not best_hbb_masks:
-            box_points = [x_min, y_min, x_max, y_min, x_max, y_max, x_min, y_max]
-            obb_annotations.append([int(label), *box_points])
+            obb_annotations.append([int(label), *fallback_points])
             aggregated_masks.append(None)
             contours.append(None)
             confidences.append(0.0)
@@ -586,10 +607,9 @@ def create_obb_annotations_multi_model(
         # Filter valid contours based on shape heuristics
         valid_hbb_contours = [c for c in hbb_contours if is_valid_contour(c, hbb_area=(xmax - xmin) * (ymax - ymin))]
 
-        # Fall back to original HBB if no valid contours found (fallback -> zero confidence)
+        # Fall back to the HBB as read if no valid contours were found (fallback -> zero confidence)
         if not valid_hbb_contours:
-            box_points = [x_min, y_min, x_max, y_min, x_max, y_max, x_min, y_max]
-            obb_annotations.append([int(label), *box_points])
+            obb_annotations.append([int(label), *fallback_points])
             contours.append(None)
             confidences.append(0.0)
             continue
