@@ -93,7 +93,20 @@ def evaluate_obb(
         no_bar (bool): Disable progress bar if True.
 
     Returns:
-        dict: Evaluation results.
+        dict: Evaluation results, over matched pairs unless stated otherwise:
+
+        - ``total_gt``, ``total_pred``, ``total_matches``: box counts on each side, and pairs matched
+        - ``total_unmatched_gt``, ``total_unmatched_pred``: boxes left without a partner
+        - ``avg_iou``, ``std_iou``, ``sem_iou``, ``median_iou``: IoU mean, standard deviation,
+          standard error of the mean, and median
+        - ``iou_fractions``: share of pairs at or above each IoU threshold, keyed ``"0.50"`` to ``"0.90"``
+        - ``avg_angle_error``, ``std_angle_error``, ``median_angle_error``, ``p90_angle_error``:
+          orientation error in degrees
+        - ``class_stats``: per ground-truth class, ``gt_total``, ``pred_total``, ``matches``,
+          ``iou_sum``, ``iou_values`` and ``angle_errors``
+        - ``cross_class_matches``: pairs whose classes differ, in class-agnostic mode
+        - ``total_edge_cases``: ground-truth boxes left out at the frame edge
+        - ``class_agnostic``, ``exclude_edge_cases``, ``excluded_classes``: the settings used
     """
     if not gt_dir.exists() or not gt_dir.is_dir():
         print(f"Error: Ground truth directory not found: {gt_dir}")
