@@ -35,7 +35,7 @@ SUPPORTED_SAM_MODELS = [
 # Shown at the end of `hbb2obb --help` so a new user discovers the rest of the toolkit.
 ENTRY_POINTS_EPILOG = (
     "The hbb2obb toolkit ships seven commands:\n"
-    "  hbb2obb           convert HBB annotations to OBBs by prompting SAM (this command)\n"
+    "  hbb2obb           convert HBB annotations to OBBs by prompting SAM\n"
     "  hbb2obb-detect    detect HBBs with an Ultralytics model, for images that have none\n"
     "  hbb2obb-convert   convert annotations between YOLO, DOTA, Pascal VOC, COCO and LabelMe\n"
     "  hbb2obb-view      inspect HBB and OBB annotations over their images, interactively\n"
@@ -160,7 +160,9 @@ def main_hbb2obb():
         default=["sam_b"],
         nargs='+',
         choices=SUPPORTED_SAM_MODELS,
-        help="Name(s) of SAM model(s) to use (default: sam_b). Multiple models can be specified to average results.",
+        metavar="MODEL",
+        help="SAM model(s) to use (default: sam_b); several are combined by majority vote. "
+        f"One or more of: {', '.join(SUPPORTED_SAM_MODELS)}",
     )
     parser.add_argument("--imgsz", type=int, default=1280, help="Image size for SAM model inference (default: 1280)")
     parser.add_argument(
@@ -178,7 +180,7 @@ def main_hbb2obb():
         default=0.15,
         help="Fraction of the mask's smaller dimension used as the morphological kernel. Positive opens "
         "(removes thin protrusions), negative closes (fills holes and rejoins a fragmented mask before the "
-        "largest contour is taken), 0 disables it.",
+        "largest contour is taken), 0 disables it (default: 0.15).",
     )
     parser.add_argument(
         "--fragment_ratio",
@@ -1101,8 +1103,8 @@ def main_hbb2obb_view():
     parser = argparse.ArgumentParser(
         description="View HBB and OBB annotations over their images: pan, zoom, and step through frames",
         epilog=(
-            "Keys: q/Esc quit, n/p or arrows change frame, wheel or +/- zoom, f fit, 1 100%%, "
-            "h HBBs, l labels, d difficult, c confidence, g polygons, t/y read the OBBs/HBBs from "
+            "Keys: q/Esc quit, n/p or arrows change frame, wheel or +/- zoom, f fit, 1 100%, "
+            "o OBBs, h HBBs, l labels, d difficult, c confidence, g polygons, t/y read the OBBs/HBBs from "
             "the next format the set ships, x comparison, s save. Drag with the left mouse button "
             "to pan."
         ),
@@ -1299,7 +1301,7 @@ def main_hbb2obb_eval():
     parser.add_argument("gt_dir", type=Path, help="Directory containing ground truth OBB annotations")
     parser.add_argument("pred_dir", type=Path, help="Directory containing predicted/converted OBB annotations")
     parser.add_argument(
-        "--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class labels to exclude from evaluation"
+        "--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class IDs to exclude from evaluation"
     )
     parser.add_argument(
         "--iou_threshold", "-t", type=float, default=0.1, help="IoU threshold for considering a match (default: 0.1)"
@@ -1390,13 +1392,13 @@ def main_hbb2obb_analyze():
         help="Image or directory of images, for the frame-edge cut and for relative HBB coordinates",
     )
     parser.add_argument("--map_path", "-mp", type=Path, help="Path to label map YAML file (optional)")
-    parser.add_argument("--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class labels to exclude")
+    parser.add_argument("--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class IDs to exclude")
     parser.add_argument(
         "--boundary_classes",
         "-bc",
         type=int,
         nargs='+',
-        help="Class labels the side-ratio table is restricted to (default: all)",
+        help="Class IDs the side-ratio table is restricted to (default: all)",
     )
     parser.add_argument(
         "--iou_threshold", "-t", type=float, default=0.1, help="IoU threshold for considering a match (default: 0.1)"
@@ -1504,7 +1506,8 @@ def main_hbb2obb_optimize():
         default=["sam_b"],
         nargs='+',
         choices=SUPPORTED_SAM_MODELS,
-        help="SAM model(s) to use (default: sam_b)",
+        metavar="MODEL",
+        help=f"SAM model(s) to use (default: sam_b). One or more of: {', '.join(SUPPORTED_SAM_MODELS)}",
     )
     grid_group.add_argument(
         "--imgsz", "-iz", type=int, nargs='+', default=None, help="Image sizes to test (default: 640 960 1280)"
@@ -1540,15 +1543,21 @@ def main_hbb2obb_optimize():
     # Evaluation options
     eval_group = parser.add_argument_group('evaluation options')
     eval_group.add_argument(
-        "--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class labels to exclude from evaluation"
+        "--excluded_classes", "-e", type=int, nargs='+', default=[], help="Class IDs to exclude from evaluation"
     )
-    eval_group.add_argument("--iou_threshold", "-t", type=float, default=0.1, help="IoU threshold for evaluation")
+    eval_group.add_argument(
+        "--iou_threshold", "-t", type=float, default=0.1, help="IoU threshold for evaluation (default: 0.1)"
+    )
     eval_group.add_argument("--class_agnostic", "-ca", action="store_true", help="Evaluate in class-agnostic mode")
     eval_group.add_argument(
         "--exclude_edge_cases", "-exc", action="store_true", help="Exclude boxes that touch image edges"
     )
     eval_group.add_argument(
-        "--edge_tolerance", "-et", type=int, default=1, help="Tolerance in pixels for detecting boxes at image edges"
+        "--edge_tolerance",
+        "-et",
+        type=int,
+        default=1,
+        help="Tolerance in pixels for detecting boxes at image edges (default: 1)",
     )
     eval_group.add_argument("--img_width", "-iw", type=int, help="Image width for edge case detection")
     eval_group.add_argument("--img_height", "-ih", type=int, help="Image height for edge case detection")
@@ -1580,7 +1589,8 @@ def main_hbb2obb_optimize():
         "--model_kwargs",
         "-k",
         type=str,
-        help="Additional keyword arguments for model in format 'key1=value1,key2=value2'",
+        help="Any other Ultralytics predictor arguments, passed through unchecked, as "
+        "'key1=value1,key2=value2'; values are Python literals where they parse as one",
     )
     parser.add_argument(
         "--models_dir",
