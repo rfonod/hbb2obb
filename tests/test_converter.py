@@ -153,6 +153,20 @@ class TestConverter(unittest.TestCase):
         for i, val in enumerate(expected_box_points):
             self.assertEqual(result[0][i + 1], val, f"OBB coordinate {i + 1} should match HBB")
 
+    def test_a_fallback_is_the_hbb_as_read_not_the_scaled_prompt(self):
+        """The prompt is enlarged by the scale factor; a box with no mask falls back to the original."""
+        mask = np.zeros((self.img_height, self.img_width), dtype=bool)
+        prompts = np.array([[0, 90.0, 95.0, 310.0, 205.0]])
+        original = np.array([[0, 100.4, 99.6, 299.5, 200.2]])
+
+        result, _, contours, confidences = create_obb_annotations_multi_model(
+            prompts, [[mask]], opening_kernel_percentage=0.0, fallback_boxes=original
+        )
+
+        self.assertEqual(list(result[0]), [0, 100, 100, 300, 100, 300, 200, 100, 200])
+        self.assertIsNone(contours[0])
+        self.assertEqual(confidences[0], 0.0)
+
     def test_create_obb_annotations_non_rectangular_mask(self):
         """Test create_obb_annotations with a non-rectangular mask"""
         # Create a triangular mask

@@ -2,7 +2,7 @@
 
 This directory contains sample data for demonstrating and testing the HBB2OBB toolkit functionality. The data includes images, horizontal bounding box (HBB) annotations, ground truth oriented bounding box (OBB) annotations, and automatically converted OBB annotations.
 
-Everything here except the four inputs listed below is produced by the tools in this repository, and the [Reproducing This Folder](#reproducing-this-folder) section gives the exact command for each artifact, in order. This file covers what is in this folder and how it was made; the [main README](../README.md) is the reference for the commands themselves, their flags and the [data formats](../README.md#data-format).
+Everything here except the four inputs listed below is produced by the tools in this repository, and the [Reproducing This Folder](#reproducing-this-folder) section gives the exact command for each artifact, in order. This file covers what is in this folder and how it was made; the [documentation site](https://rfonod.github.io/hbb2obb/) is the reference for the commands themselves, their flags and the [data formats](https://rfonod.github.io/hbb2obb/guides/data-format/).
 
 ## Data Attribution
 
@@ -77,7 +77,7 @@ Each set ships in three formats. The YOLO TXT file is canonical in each case and
 
 - **labels_hbb** (YOLO TXT, Pascal VOC, COCO): the horizontal boxes the conversion reads. Here a detector found them, as step 1 shows, and its confidence sits in a 6th column. That column is optional, and so is the detector: boxes you drew by hand are read the same way, with or without it.
 - **labels_obb_gt** (YOLO TXT, DOTA, COCO): oriented boxes drawn by hand, the ground truth for steps 5 and 6.
-- **labels_obb** (YOLO TXT, DOTA, COCO): the OBBs `hbb2obb` produced from `labels_hbb`, with a per-box confidence in an optional 10th column. This set was written with `--confidence_source combined`, so each score is the conversion quality times the detector confidence carried over from `labels_hbb` (see [Confidence scores](../README.md#confidence-scores)).
+- **labels_obb** (YOLO TXT, DOTA, COCO): the OBBs `hbb2obb` produced from `labels_hbb`, with a per-box confidence in an optional 10th column. This set was written with `--confidence_source combined`, so each score is the conversion quality times the detector confidence carried over from `labels_hbb` (see [Confidence scores](https://rfonod.github.io/hbb2obb/guides/confidence/)).
 
 Every `.txt` here is in absolute pixels, which is what the commands below produce and what DOTA and COCO are derived from. `hbb2obb`, `hbb2obb-detect` and `hbb2obb-convert` all take `--normalize` to write the relative form Ultralytics trains on instead; the readers detect either, so a normalized set converts and displays the same way.
 
@@ -105,7 +105,7 @@ This writes `labels_hbb/<frame>.txt`, the boxes and the detector's confidence in
 
 Against the hand-drawn ground truth of step 5, the detector misses one motorcycle in `00164` (a scooter with its rider) and finds one car the annotator left out, cut off by the right edge of the frame and half hidden by a tree. Step 5 therefore reports one unmatched box on each side.
 
-> If you have hand-drawn boxes of your own, `--merge_with` keeps their geometry untouched and only attaches the confidence of the detection covering each one. See the main README.
+> If you have hand-drawn boxes of your own, `--merge_with` keeps their geometry untouched and only attaches the confidence of the detection covering each one. See [Scoring hand-drawn boxes](https://rfonod.github.io/hbb2obb/guides/detect/#scoring-hand-drawn-boxes).
 
 ### 2. Convert the HBBs into OBBs
 
@@ -118,9 +118,9 @@ Wrote 201 boxes over 3 frames to data/labels_obb
 Fallback to HBB: 0 boxes (0.00%)
 ```
 
-This writes `labels_obb/<frame>.txt` (with the confidence column), the `--save_img` overlays beside them, and `labels_polygon/<frame>.txt`. It uses the defaults otherwise: a single `sam_b` model, `--imgsz 1280`, `--scale_factors 0.05`, `--opening_kernel_percentage 0.15`, `--fragment_ratio 0.1`. Better results are available from a model ensemble and tuned hyperparameters, as described in the main README.
+This writes `labels_obb/<frame>.txt` (with the confidence column), the `--save_img` overlays beside them, and `labels_polygon/<frame>.txt`. It uses the defaults otherwise: a single `sam_b` model, `--imgsz 1280`, `--scale_factors 0.05`, `--opening_kernel_percentage 0.15`, `--fragment_ratio 0.1`. Better results are available from a model ensemble and tuned hyperparameters; see [Tune hyperparameters](https://rfonod.github.io/hbb2obb/guides/optimize/).
 
-`--confidence_source combined` multiplies the conversion quality by the detector confidence from step 1. Drop the flag for the `conversion` score alone, or pass `detector` for the input confidence alone; all three work here, since step 1 wrote that 6th column. [Confidence scores](../README.md#confidence-scores) in the main README explains what the score means and how to act on it.
+`--confidence_source combined` multiplies the conversion quality by the detector confidence from step 1. Drop the flag for the `conversion` score alone, or pass `detector` for the input confidence alone; all three work here, since step 1 wrote that 6th column. [Confidence scores](https://rfonod.github.io/hbb2obb/guides/confidence/) explains what the score means and how to act on it.
 
 > Expect the geometry to reproduce to within about a pixel rather than exactly. SAM inference is not bit-reproducible across `torch` builds and hardware; re-running the command above moves a box or two by 1 px.
 
@@ -203,7 +203,7 @@ To see where those numbers come from, cut the same pairs by the ground truth's o
 hbb2obb-analyze data/labels_obb_gt data/labels_obb -hd data/labels_hbb -i data/images -mp data/classes.yaml
 ```
 
-Add `-o DIR` to write the report, a YAML and a three-panel figure as well as printing it. With 201 boxes over 3 frames most of its groups are too small to read anything into; the [main README](../README.md#breaking-down-an-evaluation) describes what it reports.
+Add `-o DIR` to write the report, a YAML and a three-panel figure as well as printing it. With 201 boxes over 3 frames most of its groups are too small to read anything into; the [analysis guide](https://rfonod.github.io/hbb2obb/guides/analyze/) describes what it reports.
 
 The three scores answer different questions and only the first saturates. Class 3, the single matched motorcycle, is where they disagree most: its IoU of 0.67 is poor but readable, while its 9.95° of orientation error against 1.00° for cars says plainly that a short, nearly square box is the case this conversion handles worst.
 
@@ -234,7 +234,7 @@ hbb2obb-view data/images --compare data/labels_obb_gt  # ground truth overlaid i
 hbb2obb-view data/images --obb_format dota             # read the DOTA files instead of the YOLO ones
 ```
 
-`q` quits, the wheel zooms, dragging pans, `o` and `h` show or hide the oriented and horizontal boxes, and `g` overlays the segmentation polygons from step 2. See [Inspecting annotations](../README.md#inspecting-annotations) for the full key list.
+`q` quits, the wheel zooms, dragging pans, `o` and `h` show or hide the oriented and horizontal boxes, and `g` overlays the segmentation polygons from step 2. See the [viewer guide](https://rfonod.github.io/hbb2obb/guides/view/#keys) for the full key list.
 
 ## Benchmark Results
 

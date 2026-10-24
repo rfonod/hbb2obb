@@ -16,6 +16,9 @@
 # or for zsh shell:
 #   pip install -e '.[dev]'
 #
+# To build the documentation site (MkDocs) from a checkout:
+#   pip install -e '.[docs]'
+#
 # ==============================================================
 
 [build-system]
@@ -69,6 +72,13 @@ dev = [
     "pytest>=7.0.0",
     "ruff>=0.11.0",
 ]
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.5",
+    "pymdown-extensions>=10.0",
+    "mkdocstrings[python]>=0.26",
+    "mkdocstrings-python>=1.8",
+]
 
 [project.scripts]
 hbb2obb = "hbb2obb.cli:main_hbb2obb"
@@ -87,6 +97,7 @@ version = { attr = "hbb2obb.__version__" }
 
 [project.urls]
 Homepage = "https://github.com/rfonod/hbb2obb/"
+Documentation = "https://rfonod.github.io/hbb2obb/"
 Repository = "https://github.com/rfonod/hbb2obb/"
 Changelog = "https://github.com/rfonod/hbb2obb/releases"
 Issues = "https://github.com/rfonod/hbb2obb/issues/"

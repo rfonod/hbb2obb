@@ -1,0 +1,4 @@
+/* Reference tables carry long descriptions; let them wrap instead of scrolling. */
+.md-typeset table:not([class]) td {
+  vertical-align: top;
+}

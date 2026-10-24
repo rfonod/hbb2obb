@@ -1,0 +1,171 @@
+# Documentation site for hbb2obb, built with MkDocs + Material and deployed to GitHub Pages by
+# .github/workflows/docs.yml. Build locally with 'mkdocs serve' (live preview) or
+# 'mkdocs build --strict' (what CI runs); both need the docs extra: pip install -e '.[docs]'.
+#
+# The help text on the reference/cli/ pages is not in docs/: docs/hooks/cli_help.py renders it from
+# the installed parsers on every build.
+
+site_name: HBB2OBB
+site_description: Convert horizontal bounding boxes to oriented ones by prompting SAM, then evaluate, tune and ship them.
+site_author: Robert Fonod
+site_url: https://rfonod.github.io/hbb2obb/
+repo_url: https://github.com/rfonod/hbb2obb
+repo_name: rfonod/hbb2obb
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Robert Fonod. Distributed under the MIT License.
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.action.edit
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+hooks:
+  - docs/hooks/cli_help.py
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            docstring_options:
+              returns_multiple_items: false
+              returns_named_value: false
+              warn_missing_types: false
+            docstring_section_style: table
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            members_order: source
+            filters: ["!^_"]
+            heading_level: 3
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      base_path: [.]
+      check_paths: true
+
+extra_css:
+  - stylesheets/extra.css
+
+exclude_docs: |
+  hooks/
+
+# 'mkdocs serve' also rebuilds when the docstrings behind the API reference or the README
+# sections included by snippets change.
+watch:
+  - hbb2obb
+  - README.md
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/rfonod/hbb2obb
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/hbb2obb/
+
+nav:
+  - Home: index.md
+  - Guides:
+      - Getting started:
+          - Installation: guides/install.md
+          - Quick start: guides/quickstart.md
+          - End-to-end workflow: guides/workflow.md
+          - Troubleshooting: guides/troubleshooting.md
+      - Commands:
+          - Detect HBBs: guides/detect.md
+          - Convert HBBs to OBBs: guides/convert.md
+          - Evaluate: guides/evaluate.md
+          - Analyze an evaluation: guides/analyze.md
+          - View annotations: guides/view.md
+          - Convert between formats: guides/formats.md
+          - Tune hyperparameters: guides/optimize.md
+      - Concepts:
+          - How the conversion works: guides/how-it-works.md
+          - Confidence scores: guides/confidence.md
+          - Metrics: guides/metrics.md
+          - Annotation formats: guides/data-format.md
+          - Provenance: guides/provenance.md
+      - In practice:
+          - Best practices and limitations: guides/practice.md
+          - "Case study: Songdo Vision OBB": guides/songdo.md
+  - CLI reference:
+      - reference/cli/index.md
+      - hbb2obb: reference/cli/hbb2obb.md
+      - hbb2obb-detect: reference/cli/hbb2obb-detect.md
+      - hbb2obb-eval: reference/cli/hbb2obb-eval.md
+      - hbb2obb-analyze: reference/cli/hbb2obb-analyze.md
+      - hbb2obb-convert: reference/cli/hbb2obb-convert.md
+      - hbb2obb-view: reference/cli/hbb2obb-view.md
+      - hbb2obb-optimize: reference/cli/hbb2obb-optimize.md
+  - API reference:
+      - reference/api/index.md
+      - converter: reference/api/converter.md
+      - detector: reference/api/detector.md
+      - evaluator: reference/api/evaluator.md
+      - analysis: reference/api/analysis.md
+      - formats: reference/api/formats.md
+  - Citation: citation.md
