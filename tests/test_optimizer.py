@@ -883,7 +883,7 @@ def test_latex_escape_leaves_no_markup_live():
     )
 
 
-def test_refresh_writes_the_table_and_the_vector_figure_away_from_the_inputs(monkeypatch, tmp_path, no_sweep):
+def test_refresh_writes_the_table_and_the_print_figure_away_from_the_inputs(monkeypatch, tmp_path, no_sweep):
     """
     What a manuscript includes is redrawn from a results folder copied off the machine that
     measured it, and a refresh of an unchanged folder must not move a single byte of either.
@@ -891,19 +891,26 @@ def test_refresh_writes_the_table_and_the_vector_figure_away_from_the_inputs(mon
     config = write_config(tmp_path)
     run_cli(monkeypatch, "-c", str(config))
     bench = tmp_path / "bench"
-    for name in (optimizer.BENCHMARK_TABLE_NAME, "comparison.pdf", "comparison_iou_at_90.pdf"):
+    outputs = (optimizer.BENCHMARK_TABLE_NAME, optimizer.BENCHMARK_FIGURE_NAME)
+    for name in outputs:
         (bench / name).unlink()
 
     moved = write_config(tmp_path, img_source=str(tmp_path / "gone"), gt_dir=str(tmp_path / "gone_too"))
     run_cli(monkeypatch, "-c", str(moved), "--refresh")
     assert no_sweep == ["sam_b", "sam_l-sam_b"]  # the first invocation's, and nothing since
-    first = {
-        name: (bench / name).read_bytes()
-        for name in (optimizer.BENCHMARK_TABLE_NAME, "comparison.pdf", "comparison_iou_at_90.pdf")
-    }
+    first = {name: (bench / name).read_bytes() for name in outputs}
 
     run_cli(monkeypatch, "-c", str(moved), "--refresh")
     assert all((bench / name).read_bytes() == content for name, content in first.items())
+    # One print figure, not a PDF beside every PNG
+    assert sorted(p.name for p in bench.glob("*.pdf")) == [optimizer.BENCHMARK_FIGURE_NAME]
+
+
+def test_no_plot_writes_the_table_but_no_figure(monkeypatch, tmp_path, no_sweep):
+    run_cli(monkeypatch, "-c", str(write_config(tmp_path)), "--no_plot")
+    bench = tmp_path / "bench"
+    assert (bench / optimizer.BENCHMARK_TABLE_NAME).is_file()
+    assert not (bench / optimizer.BENCHMARK_FIGURE_NAME).exists()
 
 
 def test_the_table_ranks_by_mean_iou_whatever_metric_was_drawn(monkeypatch, tmp_path):

@@ -10,10 +10,13 @@ kernels needs so that no two of its series come out the same colour.
 import colorsys
 from pathlib import Path
 
+import matplotlib.text
+import numpy as np
 import pytest
 import yaml
 
 from hbb2obb import plotting
+from hbb2obb.cli import SUPPORTED_SAM_MODELS
 
 pytest.importorskip("matplotlib")
 
@@ -415,19 +418,128 @@ def test_a_callout_moves_off_a_legend_that_holds_its_corner():
     plt.close(fig)
 
 
-def test_the_comparison_figure_also_lands_as_a_vector_pdf(tmp_path):
-    """
-    A manuscript includes the PDF. Its fonts are TrueType, since journals' checks reject the Type 3
-    matplotlib embeds by default, and it carries no timestamp, so redrawing it changes nothing.
-    """
+def test_the_screen_figure_stays_a_png(tmp_path):
+    """The PDF is a figure drawn for print, not a copy of this one."""
     rows = [row("a", ["sam_b"], 0.88, 10.0), row("b", ["sam_l", "sam_b"], 0.89, 40.0)]
-    png = plotting.comparison_plot(rows, tmp_path / "comparison.png")
-    pdf = tmp_path / "comparison.pdf"
+    plotting.comparison_plot(rows, tmp_path / "comparison.png")
+    assert [p.name for p in tmp_path.iterdir()] == ["comparison.png"]
 
-    assert png == tmp_path / "comparison.png" and png.is_file()
-    content = pdf.read_bytes()
+
+# ------------------------------------------------------------------------------ the print figure
+def print_row(models, iou, high, seconds, sem=0.0015):
+    """A run at its best grid point, as collect_rows returns it, with the IoU>=0.90 share."""
+    return dict(row("-".join(models), models, iou, seconds), sem_iou=sem, iou_fractions={"0.90": high})
+
+
+# The Songdo Vision OBB study: three single models within six seconds and 0.01 of each other is
+# the cluster whose labels first came loose from their points.
+CROWDED = [
+    print_row(["sam_l", "sam_b", "sam2_b", "sam2.1_b", "sam2.1_t"], 0.88728, 0.657, 385.5),
+    print_row(["sam_l"], 0.88679, 0.640, 149.4),
+    print_row(["sam_l", "sam_b", "sam2.1_b"], 0.88663, 0.652, 262.2),
+    print_row(["sam_l", "sam_b", "sam2_b", "sam2.1_b"], 0.88566, 0.638, 331.2),
+    print_row(["sam2.1_b"], 0.88457, 0.647, 160.3),
+    print_row(["sam_l", "sam_b", "mobile_sam"], 0.88414, 0.645, 257.8),
+    print_row(["sam_l", "sam_b"], 0.88284, 0.614, 203.7),
+    print_row(["sam_b"], 0.88104, 0.633, 156.9),
+    print_row(["sam2.1_t"], 0.87478, 0.644, 175.9),
+    print_row(["sam_l", "mobile_sam"], 0.86716, 0.512, 200.7),
+    print_row(["mobile_sam"], 0.85988, 0.517, 174.1),
+]
+
+
+def both_panels(rows):
+    return {"avg_iou": rows, "iou_at_90": rows}
+
+
+def _labels(figure):
+    return [t for ax in figure.axes for t in ax.texts if isinstance(t, matplotlib.text.Annotation)]
+
+
+def test_the_print_figure_fits_the_text_width_with_no_title_and_no_small_type():
+    figure = plotting.draw_print_comparison(both_panels(CROWDED))
+    try:
+        assert len(figure.axes) == 2
+        assert figure.get_size_inches()[0] <= plotting.PRINT_WIDTH
+        assert not figure._suptitle and all(not ax.get_title() for ax in figure.axes)
+        texts = figure.findobj(lambda a: hasattr(a, "get_fontsize") and hasattr(a, "get_text") and a.get_text())
+        assert texts and min(t.get_fontsize() for t in texts) >= 7.0
+        assert figure.axes[1].get_ylabel() == "Boxes at IoU ≥ 0.90 [%]"
+        assert figure.axes[1].get_ylim()[1] > 60  # a percentage, as in the table, not a fraction
+    finally:
+        plotting.plt.close(figure)
+
+
+@pytest.mark.parametrize(
+    "rows, distinct", [(CROWDED, True), (CROWDED[:4], True), (CROWDED * 2, False)], ids=["study", "few", "doubled"]
+)
+def test_every_label_sits_by_its_point_or_is_tied_to_it(rows, distinct):
+    """
+    A label that drifted off to a neighbour named the wrong point; a reader could not tell sam_l,
+    sam_b and sam2.1_b apart. Each label now sits in the first ring around its own point or has a
+    leader line to it, and no label covers another label or any point.
+    """
+    figure = plotting.draw_print_comparison(both_panels(rows))
+    try:
+        renderer = figure.canvas.get_renderer()
+        for ax in figure.axes:
+            labels = [t for t in _labels(figure) if t.axes is ax]
+            assert len(labels) == len(rows)
+            # The text alone: an annotation's own extent includes its leader line
+            boxes = [matplotlib.text.Text.get_window_extent(t, renderer) for t in labels]
+            centres = [ax.transData.transform(t.xy) for t in labels]
+            for label, box, (x, y) in zip(labels, boxes, centres):
+                nearest = np.hypot(max(box.x0 - x, 0, x - box.x1), max(box.y0 - y, 0, y - box.y1))
+                assert label.arrow_patch is not None or nearest <= 8 * figure.dpi / 72, label.get_text()
+            if not distinct:
+                continue  # twice the same points: every label has an identical twin to sit on
+            for i, box in enumerate(boxes):
+                for j, other in enumerate(boxes):
+                    assert i == j or plotting._overlap(box, other) == 0, (labels[i].get_text(), labels[j].get_text())
+                for j, (x, y) in enumerate(centres):
+                    r = np.sqrt(plotting.PRINT_POINT_AREA) / 2 * figure.dpi / 72
+                    assert i == j or not (box.x0 < x + r and box.x1 > x - r and box.y0 < y + r and box.y1 > y - r)
+    finally:
+        plotting.plt.close(figure)
+
+
+def test_a_folder_without_the_ladder_draws_the_mean_alone_at_half_width():
+    old = [{k: v for k, v in r.items() if k != "iou_fractions"} for r in CROWDED]
+    figure = plotting.draw_print_comparison(both_panels(old))
+    try:
+        assert len(figure.axes) == 1
+        assert figure.get_size_inches()[0] == pytest.approx(plotting.PRINT_WIDTH / 2)
+    finally:
+        plotting.plt.close(figure)
+    assert plotting.draw_print_comparison({"avg_iou": [], "iou_at_90": []}) is None
+
+
+def test_the_key_names_every_model_once():
+    figure = plotting.draw_print_comparison(both_panels(CROWDED))
+    try:
+        key = " ".join(t.get_text() for t in figure.texts).replace("\u00a0", " ").replace("\n", " ")
+        for model in ("sam_l", "sam_b", "sam2_b", "sam2.1_b", "sam2.1_t", "mobile_sam"):
+            assert (
+                key.count(f"{plotting.short_model_name(model)} {model},")
+                + key.count(f"{plotting.short_model_name(model)} {model};")
+                == 1
+            ), model
+    finally:
+        plotting.plt.close(figure)
+
+
+def test_short_names_tell_every_supported_model_apart():
+    short = [plotting.short_model_name(m) for m in SUPPORTED_SAM_MODELS]
+    assert len(set(short)) == len(short)
+    assert plotting.short_run_name(["sam_l", "sam2.1_b", "mobile_sam", "FastSAM-s"]) == "L+2.1B+M+FS"
+
+
+def test_the_print_figure_is_a_reproducible_pdf_with_embeddable_fonts(tmp_path):
+    """Journals' checks reject Type 3 fonts, and a redraw of the same numbers must not move a byte."""
+    out = plotting.print_comparison(both_panels(CROWDED), tmp_path / "comparison.pdf")
+    content = out.read_bytes()
     assert content.startswith(b"%PDF")
     assert b"/Subtype /Type3" not in content and b"/Subtype /CIDFontType2" in content
     assert b"/CreationDate" not in content
-    plotting.comparison_plot(rows, tmp_path / "comparison.png")
-    assert pdf.read_bytes() == content
+    plotting.print_comparison(both_panels(CROWDED), out)
+    assert out.read_bytes() == content

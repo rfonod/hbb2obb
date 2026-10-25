@@ -45,6 +45,7 @@ PLOT_NAME = "plot.png"
 BENCHMARK_SUMMARY_NAME = "summary.md"
 BENCHMARK_PLOT_NAME = "comparison.png"
 BENCHMARK_TABLE_NAME = "summary.tex"
+BENCHMARK_FIGURE_NAME = "comparison.pdf"
 BENCHMARK_PROVENANCE_NAME = "PROVENANCE.txt"
 AUTO_PLOT_METRICS = ("p90_angle_error", "iou_at_90")
 
@@ -746,6 +747,20 @@ def write_latex_table(output_folder: Path, rows: Sequence[dict]) -> Optional[Pat
     out = output_folder / BENCHMARK_TABLE_NAME
     out.write_text("\n".join(lines), encoding="utf-8")
     return out
+
+
+def write_print_figure(output_folder: Path, names: Sequence[str]) -> Optional[Path]:
+    """
+    Write ``comparison.pdf``, the comparison drawn for a manuscript beside ``summary.tex``.
+
+    Each panel reads the runs at their own best grid point for the score it draws, as each
+    ``summary_<metric>.md`` does, whatever metric the invocation was asked to plot. Returns None,
+    writing nothing, when no run has finished.
+    """
+    from hbb2obb import plotting
+
+    rows = {metric: collect_rows(output_folder, names, metric=metric) for metric, _, _ in plotting.PRINT_PANELS}
+    return plotting.print_comparison(rows, output_folder / BENCHMARK_FIGURE_NAME)
 
 
 def print_best(best: Dict[str, Any], run_folder: Path) -> None:

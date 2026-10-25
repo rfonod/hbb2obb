@@ -12,7 +12,8 @@ cost of a grid point are readable at once.
 
 ``comparison_plot`` renders a whole benchmark: one point per run, its best IoU against what
 that point cost, which is the accuracy-versus-compute trade-off the per-run plots cannot show.
-It is written as a PNG and, for a manuscript, as a PDF beside it.
+``print_comparison`` draws the same comparison for a manuscript: a PDF at text width, without a
+title, mean IoU beside the share of boxes at IoU 0.90 or above, every point labelled.
 
 Both are called by ``hbb2obb-optimize``; there is no separate plotting command.
 """
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import colorsys
 import os
+import textwrap
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional, Sequence
 
@@ -33,7 +35,9 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import yaml  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
+from matplotlib.path import Path as MplPath  # noqa: E402
 from matplotlib.ticker import FixedLocator, NullLocator, ScalarFormatter  # noqa: E402
+from matplotlib.transforms import Bbox  # noqa: E402
 
 COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 MARKERS = ['s', '^', 'o', 'D', 'P', '*', 'X']
@@ -41,6 +45,9 @@ MARKERS = ['s', '^', 'o', 'D', 'P', '*', 'X']
 # The lightness a kernel ladder runs between, lightest kernel first. Kept clear of both ends so
 # no shade washes out against the white ground or goes dark enough to lose its hue.
 SHADE_RANGE = (0.70, 0.30)
+
+# Round numbers of seconds, the ticks of a logarithmic time axis.
+SECONDS_LADDER = [1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 70, 100, 150, 200, 300, 500, 700, 1000]
 
 
 class Metric(NamedTuple):
@@ -693,9 +700,8 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300, metric: 
         x_lo, x_hi = min(times) / 1.25, max(times) * 1.18
         # Decade ticks alone would label almost nothing over a single decade, and the default
         # minor labels collide with them. A fixed ladder of round numbers reads as seconds.
-        ladder = [1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 70, 100, 150, 200, 300, 500, 700, 1000]
         axis = plt.gca().xaxis
-        axis.set_major_locator(FixedLocator([t for t in ladder if x_lo <= t <= x_hi]))
+        axis.set_major_locator(FixedLocator([t for t in SECONDS_LADDER if x_lo <= t <= x_hi]))
         axis.set_minor_locator(NullLocator())
         axis.set_major_formatter(ScalarFormatter())
     else:
@@ -801,21 +807,264 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300, metric: 
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
     plt.savefig(output, dpi=dpi, bbox_inches='tight')
-    output = Path(output)
-    if output.suffix.lower() != ".pdf":
-        save_vector_twin(plt.gcf(), output.with_suffix(".pdf"))
     plt.close()
     return output
 
 
-def save_vector_twin(figure, path: Path) -> Path:
-    """
-    Save ``figure`` as a PDF that a manuscript can include as it is.
+# ------------------------------------------------------------------------------ the print figure
+# A manuscript's text width, and the smallest type that stays legible printed at it. The figure is
+# drawn at that size so it is included at 100% and every font prints at the size set here.
+PRINT_WIDTH = 6.4
+PRINT_PANEL_HEIGHT = 2.6
+PRINT_FONT_SIZE = 7.5
+PRINT_LABEL_SIZE = 7.0
+PRINT_POINT_AREA = 22.0
 
-    Fonts are embedded as TrueType rather than matplotlib's default Type 3, which publishers'
-    PDF checks reject, and the creation date is left out, so a ``--refresh`` of an unchanged
-    folder writes the same bytes and the file only moves when a number does.
+# Offsets a label tries, in points from the centre of its marker. At the first radius a label reads
+# as belonging to its point; anywhere further out it gets a leader line.
+LABEL_RADII = (4.0, 9.0, 15.0, 22.0, 30.0, 40.0, 52.0)
+LABEL_DIRECTIONS = ((1, 0), (-1, 0), (0.7, 0.7), (-0.7, 0.7), (0.7, -0.7), (-0.7, -0.7), (0, 1), (0, -1))
+
+
+def short_model_name(model: str) -> str:
     """
+    A model's name as a figure label can afford it: ``sam_l`` is L, ``sam2.1_b`` 2.1B,
+    ``mobile_sam`` M, ``sam3`` 3, ``FastSAM-s`` FS. The figure prints the key beneath itself.
+    """
+    if model == "mobile_sam":
+        return "M"
+    if model.startswith("FastSAM-"):
+        return "F" + model.split("-", 1)[1].upper()
+    if model.startswith("sam"):
+        version, _, size = model[3:].partition("_")
+        return version + size.upper()
+    return model
+
+
+def short_run_name(models: Sequence[str]) -> str:
+    """An ensemble's label: its models' short names joined by '+'."""
+    return "+".join(short_model_name(m) for m in models)
+
+
+def _overlap(box, other) -> float:
+    """Area two display-space boxes share, zero when they do not touch."""
+    width = min(box.x1, other.x1) - max(box.x0, other.x0)
+    height = min(box.y1, other.y1) - max(box.y0, other.y0)
+    return width * height if width > 0 and height > 0 else 0.0
+
+
+def place_point_labels(
+    ax, points: Sequence[tuple], labels: Sequence[str], fontsize: float, lines: Sequence = ()
+) -> list:
+    """
+    Label every point beside itself, or tied to itself by a leader line.
+
+    Labels are placed greedily, the most crowded points first. Each tries every offset of
+    ``LABEL_RADII`` x ``LABEL_DIRECTIONS`` inside the axes and takes the cheapest: covering a
+    marker or a label already placed costs most, crossing one of ``lines`` (data-space polylines,
+    such as the Pareto front) or running a leader across another label costs a little, and so does
+    distance. A label past the first ring is joined to its point by a thin line, so one that had
+    to move away still says which point it names. The axes limits must be final before this runs,
+    since it measures in display space.
+    """
+    figure = ax.figure
+    renderer = figure.canvas.get_renderer()
+    px_per_pt = figure.dpi / 72.0
+    frame = ax.get_window_extent(renderer)
+    centres = [ax.transData.transform(p) for p in points]
+    marker = (np.sqrt(PRINT_POINT_AREA) / 2 + 0.8) * px_per_pt
+    markers = [Bbox.from_extents(x - marker, y - marker, x + marker, y + marker) for x, y in centres]
+    gap = 0.8 * px_per_pt
+    paths = [MplPath(ax.transData.transform(np.asarray(line, dtype=float))) for line in lines if len(line) > 1]
+
+    def crowding(i: int) -> int:
+        cx, cy = centres[i]
+        return sum(np.hypot(cx - x, cy - y) < 30 * px_per_pt for x, y in centres)
+
+    placed, leaders, annotations = [], [], [None] * len(points)
+    for i in sorted(range(len(points)), key=lambda i: (-crowding(i), centres[i][0])):
+        best = None
+        for radius in LABEL_RADII:
+            for dx, dy in LABEL_DIRECTIONS:
+                trial = ax.annotate(
+                    labels[i],
+                    xy=points[i],
+                    xytext=(dx * radius, dy * radius),
+                    textcoords="offset points",
+                    ha="left" if dx > 0 else "right" if dx < 0 else "center",
+                    va="bottom" if dy > 0 else "top" if dy < 0 else "center",
+                    fontsize=fontsize,
+                )
+                box = trial.get_window_extent(renderer).padded(gap)
+                trial.remove()
+                if box.x0 < frame.x0 or box.x1 > frame.x1 or box.y0 < frame.y0 or box.y1 > frame.y1:
+                    continue
+                # Covering a marker or another label is never worth it while any free offset is
+                # left, so each one costs more than the farthest ring. A leader through a label, in
+                # either order of placement, costs more than any distance, a leader crossing a
+                # leader or a label crossing a line a little, and distance decides the rest.
+                covered = [_overlap(box, other) for other in markers + placed]
+                cost = sum(10.0 + c / (box.width * box.height) for c in covered if c > 0)
+                cost += sum(0.3 for path in paths if path.intersects_bbox(box, filled=False))
+                cost += sum(2.0 for other in leaders if other.intersects_bbox(box, filled=False))
+                cost += radius / 40.0
+                leader = None
+                if radius > LABEL_RADII[0]:
+                    leader = MplPath([centres[i], ((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2)])
+                    cost += sum(2.0 for other in placed if leader.intersects_bbox(other, filled=False))
+                    cost += sum(0.5 for other in leaders if leader.intersects_path(other, filled=False))
+                if best is None or cost < best[0]:
+                    best = (cost, radius, dx, dy, box, leader)
+        if best is None:  # a point with no room inside the axes at all: label it beside itself
+            best = (0.0, LABEL_RADII[0], 1, 0, None, None)
+        _, radius, dx, dy, box, leader_path = best
+        leader = radius > LABEL_RADII[0]
+        annotations[i] = ax.annotate(
+            labels[i],
+            xy=points[i],
+            xytext=(dx * radius, dy * radius),
+            textcoords="offset points",
+            ha="left" if dx > 0 else "right" if dx < 0 else "center",
+            va="bottom" if dy > 0 else "top" if dy < 0 else "center",
+            fontsize=fontsize,
+            arrowprops=(
+                dict(arrowstyle="-", color="0.45", linewidth=0.5, shrinkA=0.5, shrinkB=np.sqrt(PRINT_POINT_AREA) / 2)
+                if leader
+                else None
+            ),
+            zorder=4,
+        )
+        if box is not None:
+            placed.append(box)
+        if leader_path is not None:
+            leaders.append(leader_path)
+    return annotations
+
+
+def _print_panel(ax, rows: Sequence[dict], spec: Metric, scale: float, ylabel: str) -> list:
+    """One panel of the print figure: each run at its best grid point for ``spec``, against time."""
+    rows = [r for r in rows if spec.value(r) is not None]
+    times = [float(r["execution_time"]) for r in rows]
+    values = [spec.value(r) * scale for r in rows]
+
+    leader = best_row(rows, spec)
+    band = spec.resolution(leader) if leader is not None else None
+    edges = [spec.value(leader) * scale - band * scale, spec.value(leader) * scale + band * scale] if band else []
+    if band:
+        ax.axhspan(*edges, color="0.5", alpha=0.15, linewidth=0, zorder=1, label="±1 standard error of the best")
+
+    if use_log_scale(times):
+        ax.set_xscale("log")
+        x_lo, x_hi = min(times) / 1.2, max(times) * 1.2
+        ax.xaxis.set_major_locator(FixedLocator([t for t in SECONDS_LADDER if x_lo <= t <= x_hi]))
+        ax.xaxis.set_minor_locator(NullLocator())
+        ax.xaxis.set_major_formatter(ScalarFormatter())
+    else:
+        x_span = (max(times) - min(times)) or 1.0
+        x_lo, x_hi = min(times) - 0.12 * x_span, max(times) + 0.12 * x_span
+    span = (max(values + edges) - min(values + edges)) or 1.0
+    ax.set_xlim(x_lo, x_hi)
+    ax.set_ylim(min(values + edges) - 0.14 * span, max(values + edges) + 0.2 * span)
+
+    def beats(other: dict, row: dict) -> bool:
+        better = spec.value(other) > spec.value(row) if spec.higher_is_better else spec.value(other) < spec.value(row)
+        return better and other["execution_time"] < row["execution_time"]
+
+    front = sorted((r for r in rows if not any(beats(o, r) for o in rows)), key=lambda r: r["execution_time"])
+    if len(front) > 1:
+        ax.plot(
+            [r["execution_time"] for r in front],
+            [spec.value(r) * scale for r in front],
+            color="0.35",
+            linestyle="--",
+            linewidth=0.8,
+            zorder=2,
+            label="Pareto front",
+        )
+    ax.scatter(times, values, s=PRINT_POINT_AREA, color=COLORS[0], edgecolors="black", linewidths=0.4, zorder=3)
+    ax.set_xlabel("Time per pass [s]")
+    ax.set_ylabel(ylabel)
+    ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.7)
+    return rows, [(r["execution_time"], spec.value(r) * scale) for r in front]
+
+
+PRINT_PANELS = (
+    ("avg_iou", 1.0, "Mean IoU"),
+    ("iou_at_90", 100.0, "Boxes at IoU ≥ 0.90 [%]"),
+)
+
+
+def draw_print_comparison(rows_by_metric: dict):
+    """
+    The figure ``print_comparison`` saves, returned open so it can be inspected.
+
+    ``rows_by_metric`` maps each metric of ``PRINT_PANELS`` to ``optimizer.collect_rows`` on it,
+    so each panel shows every run at that run's own best grid point for the score drawn. A metric
+    no run recorded has no panel, and the figure is then half the width. Returns None when no
+    panel has anything to draw.
+    """
+    panels = []
+    for name, scale, ylabel in PRINT_PANELS:
+        spec = METRICS[name]
+        if any(spec.value(r) is not None for r in rows_by_metric.get(name) or []):
+            panels.append((rows_by_metric[name], spec, scale, ylabel))
+    if not panels:
+        return None
+
+    style = {
+        "font.size": PRINT_FONT_SIZE,
+        "axes.labelsize": PRINT_FONT_SIZE,
+        "xtick.labelsize": PRINT_FONT_SIZE - 0.5,
+        "ytick.labelsize": PRINT_FONT_SIZE - 0.5,
+        "legend.fontsize": PRINT_LABEL_SIZE,
+        "axes.linewidth": 0.6,
+        "pdf.fonttype": 42,  # TrueType: publishers' checks reject matplotlib's default Type 3
+    }
+    with matplotlib.rc_context(style):
+        width = PRINT_WIDTH * len(panels) / len(PRINT_PANELS)
+        figure, axes = plt.subplots(1, len(panels), figsize=(width, PRINT_PANEL_HEIGHT), squeeze=False)
+        drawn = [_print_panel(ax, *panel) for ax, panel in zip(axes[0], panels)]
+        figure.tight_layout(w_pad=2.0)
+        models = []
+        for ax, (rows, front), (_, spec, scale, _) in zip(axes[0], drawn, panels):
+            points = [(r["execution_time"], spec.value(r) * scale) for r in rows]
+            labels = [short_run_name(r["sam_models"]) for r in rows]
+            place_point_labels(ax, points, labels, PRINT_LABEL_SIZE, lines=[front])
+            models += [r["sam_models"] for r in rows]
+        models = sorted({m for ensemble in models for m in ensemble}, key=short_model_name)
+
+        handles, names = [], []
+        for ax in axes[0]:
+            for handle, label in zip(*ax.get_legend_handles_labels()):
+                if label not in names:
+                    handles.append(handle)
+                    names.append(label)
+        if handles:
+            figure.legend(
+                handles, names, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(handles), frameon=False
+            )
+        # A no-break space inside each entry, so a line never ends between a short name and its model
+        key = ", ".join(f"{short_model_name(m)}\u00a0{m}" for m in models)
+        # Wrapped on a conservative character width, so the key never widens the page past the panels
+        lines = textwrap.wrap(f"Models: {key}; + joins an ensemble.", width=int(width * 72 / (PRINT_LABEL_SIZE * 0.6)))
+        renderer = figure.canvas.get_renderer()
+        bottom = min(ax.get_tightbbox(renderer).y0 for ax in axes[0]) / (figure.dpi * PRINT_PANEL_HEIGHT)
+        figure.text(0.5, bottom - 0.02, "\n".join(lines), ha="center", va="top", fontsize=PRINT_LABEL_SIZE)
+    return figure
+
+
+def print_comparison(rows_by_metric: dict, output: Path) -> Optional[Path]:
+    """
+    Save the benchmark's comparison as a figure for a manuscript, or return None if nothing to draw.
+
+    Drawn at text width so it is included at 100%: no title, which is the caption's job, type no
+    smaller than 7 pt, and every point labelled. Its fonts are embedded as TrueType and it records
+    no creation date, so redrawing an unchanged folder writes the same bytes.
+    """
+    figure = draw_print_comparison(rows_by_metric)
+    if figure is None:
+        return None
     with matplotlib.rc_context({"pdf.fonttype": 42}):
-        figure.savefig(path, bbox_inches='tight', metadata={"CreationDate": None})
-    return path
+        figure.savefig(output, bbox_inches="tight", pad_inches=0.02, metadata={"CreationDate": None})
+    plt.close(figure)
+    return output

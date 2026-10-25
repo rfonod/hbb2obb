@@ -1572,8 +1572,8 @@ def main_hbb2obb_optimize():
         "--refresh",
         action="store_true",
         help=(
-            "Re-render the plots, summary.md and the LaTeX table summary.tex from the results already "
-            "on disk, running no SAM passes"
+            "Re-render the plots, summary.md, the LaTeX table summary.tex and the print figure "
+            "comparison.pdf from the results already on disk, running no SAM passes"
         ),
     )
     bench_group.add_argument(
@@ -1858,6 +1858,10 @@ def main_hbb2obb_optimize():
     )
     if table is not None:
         print(f"Wrote {table}")
+    if plot:
+        figure = optimizer.write_print_figure(output_folder, names)
+        if figure is not None:
+            print(f"Wrote {figure}")
 
     # Draw the metrics the search did not rank by, unless the caller asked for one specific metric.
     # They are already recorded at every grid point, so this runs no SAM and takes about a second;
