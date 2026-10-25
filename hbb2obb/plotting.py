@@ -12,6 +12,7 @@ cost of a grid point are readable at once.
 
 ``comparison_plot`` renders a whole benchmark: one point per run, its best IoU against what
 that point cost, which is the accuracy-versus-compute trade-off the per-run plots cannot show.
+It is written as a PNG and, for a manuscript, as a PDF beside it.
 
 Both are called by ``hbb2obb-optimize``; there is no separate plotting command.
 """
@@ -800,5 +801,21 @@ def comparison_plot(rows: Sequence[dict], output: Path, dpi: int = 300, metric: 
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
     plt.savefig(output, dpi=dpi, bbox_inches='tight')
+    output = Path(output)
+    if output.suffix.lower() != ".pdf":
+        save_vector_twin(plt.gcf(), output.with_suffix(".pdf"))
     plt.close()
     return output
+
+
+def save_vector_twin(figure, path: Path) -> Path:
+    """
+    Save ``figure`` as a PDF that a manuscript can include as it is.
+
+    Fonts are embedded as TrueType rather than matplotlib's default Type 3, which publishers'
+    PDF checks reject, and the creation date is left out, so a ``--refresh`` of an unchanged
+    folder writes the same bytes and the file only moves when a number does.
+    """
+    with matplotlib.rc_context({"pdf.fonttype": 42}):
+        figure.savefig(path, bbox_inches='tight', metadata={"CreationDate": None})
+    return path

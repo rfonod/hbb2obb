@@ -1571,7 +1571,10 @@ def main_hbb2obb_optimize():
     bench_group.add_argument(
         "--refresh",
         action="store_true",
-        help="Re-render the plots and summary.md from the results already on disk, running no SAM passes",
+        help=(
+            "Re-render the plots, summary.md and the LaTeX table summary.tex from the results already "
+            "on disk, running no SAM passes"
+        ),
     )
     bench_group.add_argument(
         "--dry_run", action="store_true", help="Print the runs, the grid size and the total cost, then stop"
@@ -1848,6 +1851,13 @@ def main_hbb2obb_optimize():
         metric=args.plot_metric,
     )
     print(f"\nWrote {summary}")
+    # The table is defined on the ranking metric whatever --plot_metric drew, so it never changes
+    # meaning with the flag a refresh happened to be given.
+    table = optimizer.write_latex_table(
+        output_folder, rows if args.plot_metric is None else optimizer.collect_rows(output_folder, names)
+    )
+    if table is not None:
+        print(f"Wrote {table}")
 
     # Draw the metrics the search did not rank by, unless the caller asked for one specific metric.
     # They are already recorded at every grid point, so this runs no SAM and takes about a second;

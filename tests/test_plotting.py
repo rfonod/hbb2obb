@@ -413,3 +413,21 @@ def test_a_callout_moves_off_a_legend_that_holds_its_corner():
         min(box.x1, blocked.x1) - max(box.x0, blocked.x0) <= 0 or min(box.y1, blocked.y1) - max(box.y0, blocked.y0) <= 0
     )
     plt.close(fig)
+
+
+def test_the_comparison_figure_also_lands_as_a_vector_pdf(tmp_path):
+    """
+    A manuscript includes the PDF. Its fonts are TrueType, since journals' checks reject the Type 3
+    matplotlib embeds by default, and it carries no timestamp, so redrawing it changes nothing.
+    """
+    rows = [row("a", ["sam_b"], 0.88, 10.0), row("b", ["sam_l", "sam_b"], 0.89, 40.0)]
+    png = plotting.comparison_plot(rows, tmp_path / "comparison.png")
+    pdf = tmp_path / "comparison.pdf"
+
+    assert png == tmp_path / "comparison.png" and png.is_file()
+    content = pdf.read_bytes()
+    assert content.startswith(b"%PDF")
+    assert b"/Subtype /Type3" not in content and b"/Subtype /CIDFontType2" in content
+    assert b"/CreationDate" not in content
+    plotting.comparison_plot(rows, tmp_path / "comparison.png")
+    assert pdf.read_bytes() == content
