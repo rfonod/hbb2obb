@@ -91,7 +91,7 @@ hbb2obb images --sam_models sam_l sam_b --imgsz 1280 --scale_factors 0.05 --open
 \end{table}
 ```
 
-Its comment header gives the run, grid point and ground-truth box counts. The figures to go with it are `comparison.pdf` and `comparison_iou_at_90.pdf`. A `--refresh` of an unchanged folder rewrites `summary.tex` and the PDFs byte for byte.
+Its comment header gives the run, grid point and ground-truth box counts. The sample benchmark ships one: [`data/benchmark_results/summary.tex`](https://github.com/rfonod/hbb2obb/blob/main/data/benchmark_results/summary.tex). The figures to go with it are `comparison.pdf` and `comparison_iou_at_90.pdf`. A `--refresh` of an unchanged folder rewrites `summary.tex` and the PDFs byte for byte.
 
 ## Plotting another metric
 
