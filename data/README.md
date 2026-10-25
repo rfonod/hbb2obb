@@ -61,7 +61,9 @@ data/
 │
 └── benchmark_results/             # output    one sweep per SAM combination, plus what reads them together
     ├── summary.md                 #   every run in one table, and the winner
+    ├── summary.tex                #   the same runs as a LaTeX table
     ├── comparison.png             #   best IoU against execution time, one point per run
+    ├── comparison.pdf             #   the comparison drawn for a manuscript
     ├── PROVENANCE.txt             #   source, checkpoint and input hashes, versions, the command
     ├── benchmark.yaml             #   a copy of the config, so the folder re-runs on its own
     └── <name>/                    #   one sweep
@@ -214,7 +216,7 @@ Every sweep in `benchmark_results/` is described by [`benchmark.yaml`](benchmark
 ```bash
 hbb2obb-optimize -c data/benchmark.yaml --dry_run   # what it will do, and what it will cost
 hbb2obb-optimize -c data/benchmark.yaml             # the whole thing
-hbb2obb-optimize -c data/benchmark.yaml --refresh   # only redraw the plots and summary.md
+hbb2obb-optimize -c data/benchmark.yaml --refresh   # only redraw the plots, summary.md and summary.tex
 ```
 
 Eighteen model combinations, each a full grid of 3 inference sizes x 12 scale factors x 1 opening kernel, so 36 SAM passes per combination and 648 in total. That took 2.92 hours on a laptop CPU; `--resume` skips the combinations already finished. To sweep something else once, without touching the config:
@@ -240,9 +242,9 @@ hbb2obb-view data/images --obb_format dota             # read the DOTA files ins
 
 The `benchmark_results` directory holds the sweeps described in step 6, one subfolder per set of SAM models. They are shipped **for illustration**: to show what the optimizer produces and what its artifacts look like. They are measured against the boxes this folder ships, so step 6 reproduces them.
 
-They were measured before the orientation error, the IoU ladder and the fragment ratio were recorded, so their `results.yaml` files hold none of them. The readers cope with that rather than crashing: `--refresh` leaves those columns empty, and `--plot_metric` on one of the newer metrics reports that no grid point recorded it. A fresh run of step 6 fills them in, and writes the `plot_median_angle_error.png`, `plot_iou_at_90.png` and matching `comparison_*.png` / `summary_*.md` that this folder, measured before they existed, does not ship. `--resume` re-runs them for the same reason: a grid point that records no fragment ratio was measured with the largest mask piece alone, which is not what the config now asks for.
+They were measured before the orientation error, the IoU ladder and the fragment ratio were recorded, so their `results.yaml` files hold none of them. The readers cope with that rather than crashing: `--refresh` leaves those columns empty (`--` in `summary.tex`), and `--plot_metric` on one of the newer metrics reports that no grid point recorded it. A fresh run of step 6 fills them in, and writes the `plot_median_angle_error.png`, `plot_iou_at_90.png` and matching `comparison_*.png` / `summary_*.md` that this folder, measured before they existed, does not ship. `--resume` re-runs them for the same reason: a grid point that records no fragment ratio was measured with the largest mask piece alone, which is not what the config now asks for.
 
-**[`benchmark_results/summary.md`](benchmark_results/summary.md) is the generated write-up:** every run's best grid point in one table, sorted by IoU, with the winner named and `comparison.png` showing accuracy against compute. [`benchmark_results/PROVENANCE.txt`](benchmark_results/PROVENANCE.txt) records the checkpoint hashes, the hashes of the label sets the numbers were measured against, a digest of the hbb2obb source that ran, the library versions and the command. Both are written by the command that produces the runs, and `benchmark.yaml` is copied in beside them.
+**[`benchmark_results/summary.md`](benchmark_results/summary.md) is the generated write-up:** every run's best grid point in one table, sorted by IoU, with the winner named and `comparison.png` showing accuracy against compute. [`benchmark_results/summary.tex`](benchmark_results/summary.tex) and [`comparison.pdf`](benchmark_results/comparison.pdf) are the table and the figure for a manuscript; the figure has only the mean IoU panel here, since these runs predate the IoU ladder. [`benchmark_results/PROVENANCE.txt`](benchmark_results/PROVENANCE.txt) records the checkpoint hashes, the hashes of the label sets the numbers were measured against, a digest of the hbb2obb source that ran, the library versions and the command. All of them are written by the command that produces the runs, and `benchmark.yaml` is copied in beside them.
 
 ![Best average IoU against execution time, one point per run, with a Pareto front](benchmark_results/comparison.png)
 

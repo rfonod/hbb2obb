@@ -801,3 +801,125 @@ def test_every_summary_a_sweep_writes_reports_one_wall_time(monkeypatch, tmp_pat
         assert len(lines) == 1, name
         reported.add(lines[0])
     assert len(reported) == 1, reported
+
+
+# ------------------------------------------------------------------------------- the LaTeX table
+def _table_row(name, models, iou, sem, **extra):
+    point = dict(grid_point(iou=iou), sem_iou=sem, **extra)
+    return {"name": name, "sam_models": models, "n_points": 45, "sweep_seconds": 100.0, **point}
+
+
+def _body(path):
+    """The data rows of a written table, one list of cells each."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start, end = lines.index(r"  \midrule"), lines.index(r"  \bottomrule")
+    return [line.strip().removesuffix(r"\\").strip().split(" & ") for line in lines[start + 1 : end]]
+
+
+def test_the_table_bolds_exactly_the_runs_tied_with_the_leader(tmp_path):
+    """
+    Inside one standard error of the leader a run is tied with it, not ranked below it; that is
+    the band the comparison figure shades, so the table and the figure have to agree on who is in.
+    """
+    rows = [
+        _table_row("five", ["sam_l", "sam_b", "sam2_b", "sam2.1_b", "sam2.1_t"], 0.88728, 0.00150),
+        _table_row("sam_l", ["sam_l"], 0.88679, 0.00143),
+        _table_row("three", ["sam_l", "sam_b", "sam2.1_b"], 0.88578, 0.00147),  # exactly on the edge
+        _table_row("four", ["sam_l", "sam_b", "sam2_b", "sam2.1_b"], 0.88566, 0.00148),
+    ]
+    out = optimizer.write_latex_table(tmp_path, rows)
+
+    assert out == tmp_path / optimizer.BENCHMARK_TABLE_NAME
+    body = _body(out)
+    assert [r[4].startswith(r"\textbf{") for r in body] == [True, True, True, False]
+    assert body[0][0] == r"sam\_l + sam\_b + sam2\_b + sam2.1\_b + sam2.1\_t"
+    assert body[0][4] == r"\textbf{0.88728} $\pm$ 0.00150"
+    assert body[3][4] == r"0.88566 $\pm$ 0.00148"
+
+
+def test_the_table_reports_the_point_and_the_scores_the_brief_asks_for(tmp_path):
+    rows = [_table_row("sam_l", ["sam_l"], 0.88679, 0.00143, imgsz=1024, scale_factor=-0.01)]
+    rows[0].update(opening_kernel_percentage=-0.1, p90_angle_error=3.5, execution_time=149.4)
+    rows[0]["iou_fractions"] = {"0.90": 0.615}
+    out = optimizer.write_latex_table(tmp_path, rows)
+
+    text = out.read_text(encoding="utf-8")
+    assert r"Models & Size & Scale & Kernel & Mean IoU & IoU$\geq$0.90 & Angle$_{90}$ [$^\circ$] & Time [s]" in text
+    # A minus sign, not a hyphen, and the share as a percentage of all boxes
+    assert _body(out)[0] == [
+        "sam\\_l",
+        "1024",
+        "$-$0.01",
+        "$-$0.1",
+        r"\textbf{0.88679} $\pm$ 0.00143",
+        r"61.5\%",
+        "3.50",
+        "149.4",
+    ]
+    assert "1 run(s), 45 grid points per run, 201 ground-truth boxes" in text
+    # Only the tabular: the caption and the label belong to the document that includes it
+    assert r"\caption" not in text and r"\begin{table}" not in text
+
+
+def test_a_run_measured_before_the_newer_metrics_still_has_its_row(tmp_path):
+    """No ladder, no angle and no recorded SEM: the row stays, the SEM is derived, the rest is --."""
+    old = _table_row("sam_b", ["sam_b"], 0.89, None)
+    for key in ("sem_iou", "iou_fractions", "p90_angle_error"):
+        old.pop(key)
+    body = _body(optimizer.write_latex_table(tmp_path, [old]))
+
+    assert body[0][4] == rf"\textbf{{0.89000}} $\pm$ {0.07 / 200**0.5:.5f}"
+    assert body[0][5:7] == ["--", "--"]
+
+
+def test_no_finished_run_writes_no_table(tmp_path):
+    assert optimizer.write_latex_table(tmp_path, []) is None
+    assert not (tmp_path / optimizer.BENCHMARK_TABLE_NAME).exists()
+
+
+def test_latex_escape_leaves_no_markup_live():
+    assert optimizer.latex_escape("a_b&c%d$e#f{g}h~i^j\\k") == (
+        r"a\_b\&c\%d\$e\#f\{g\}h\textasciitilde{}i\textasciicircum{}j\textbackslash{}k"
+    )
+
+
+def test_refresh_writes_the_table_and_the_print_figure_away_from_the_inputs(monkeypatch, tmp_path, no_sweep):
+    """
+    What a manuscript includes is redrawn from a results folder copied off the machine that
+    measured it, and a refresh of an unchanged folder must not move a single byte of either.
+    """
+    config = write_config(tmp_path)
+    run_cli(monkeypatch, "-c", str(config))
+    bench = tmp_path / "bench"
+    outputs = (optimizer.BENCHMARK_TABLE_NAME, optimizer.BENCHMARK_FIGURE_NAME)
+    for name in outputs:
+        (bench / name).unlink()
+
+    moved = write_config(tmp_path, img_source=str(tmp_path / "gone"), gt_dir=str(tmp_path / "gone_too"))
+    run_cli(monkeypatch, "-c", str(moved), "--refresh")
+    assert no_sweep == ["sam_b", "sam_l-sam_b"]  # the first invocation's, and nothing since
+    first = {name: (bench / name).read_bytes() for name in outputs}
+
+    run_cli(monkeypatch, "-c", str(moved), "--refresh")
+    assert all((bench / name).read_bytes() == content for name, content in first.items())
+    # One print figure, not a PDF beside every PNG
+    assert sorted(p.name for p in bench.glob("*.pdf")) == [optimizer.BENCHMARK_FIGURE_NAME]
+
+
+def test_no_plot_writes_the_table_but_no_figure(monkeypatch, tmp_path, no_sweep):
+    run_cli(monkeypatch, "-c", str(write_config(tmp_path)), "--no_plot")
+    bench = tmp_path / "bench"
+    assert (bench / optimizer.BENCHMARK_TABLE_NAME).is_file()
+    assert not (bench / optimizer.BENCHMARK_FIGURE_NAME).exists()
+
+
+def test_the_table_ranks_by_mean_iou_whatever_metric_was_drawn(monkeypatch, tmp_path):
+    """Its definition is the highest-mean-IoU point; --plot_metric changes the figures, not that."""
+    bench = tmp_path / "bench"
+    _two_point_run(
+        bench / "sam_b", ["sam_b"], objective_iou=0.90, objective_high=0.41, contender_iou=0.87, contender_high=0.66
+    )
+    config = write_config(tmp_path, runs=[{"sam_models": ["sam_b"]}])
+    run_cli(monkeypatch, "-c", str(config), "--refresh", "--no_plot", "--plot_metric", "iou_at_90")
+
+    assert _body(bench / optimizer.BENCHMARK_TABLE_NAME)[0][2] == "0.04"  # the mean's point, not 0.05

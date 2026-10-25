@@ -41,7 +41,9 @@ benchmark_results/
 │   ├── summary.txt       # the best grid point, then every grid point ranked
 │   └── plot.png          # IoU against scale factor
 ├── summary.md            # the best grid point of every run, in one table
+├── summary.tex           # the same runs as a LaTeX table
 ├── comparison.png        # best IoU against execution time, one point per run
+├── comparison.pdf        # the comparison drawn for a manuscript
 └── PROVENANCE.txt        # the command, versions, source digest, checkpoint and label hashes
 ```
 
@@ -63,7 +65,7 @@ BEST PARAMETERS:
 
 ![IoU against scale factor for the sam_b run of the sample benchmark](https://raw.githubusercontent.com/rfonod/hbb2obb/main/data/benchmark_results/sam_b/plot.png)
 
-`summary.md`, `comparison.png` and `PROVENANCE.txt` cover every run in the output folder, including runs from earlier invocations. `comparison.png` plots each run's best grid point against its execution time, with the Pareto front dashed:
+`summary.md`, `summary.tex`, `comparison.png` and `PROVENANCE.txt` cover every run in the output folder, including runs from earlier invocations. `comparison.png` plots each run's best grid point against its execution time, with the Pareto front dashed.:
 
 ![Best IoU against execution time for the 18 runs of the sample benchmark](https://raw.githubusercontent.com/rfonod/hbb2obb/main/data/benchmark_results/comparison.png)
 
@@ -76,6 +78,22 @@ Then convert with the winning settings:
 ```bash
 hbb2obb images --sam_models sam_l sam_b --imgsz 1280 --scale_factors 0.05 --opening_kernel_percentage 0.15
 ```
+
+## In a manuscript
+
+`summary.tex` is the table for a manuscript: one row per run at its grid point of highest mean IoU, with that point's image size, scale factor and kernel, the mean IoU ± `sem_iou`, the share of boxes at IoU ≥ 0.90, the 90th percentile orientation error and the time of one pass. The runs within one `sem_iou` of the leader are in bold. It holds only the `tabular` (it needs `booktabs`), so the caption and label stay in your document:
+
+```latex
+\begin{table}
+  \centering
+  \caption{...}
+  \input{benchmark_results/summary.tex}
+\end{table}
+```
+
+Its comment header gives the run, grid point and ground-truth box counts. The sample benchmark ships one: [`data/benchmark_results/summary.tex`](https://github.com/rfonod/hbb2obb/blob/main/data/benchmark_results/summary.tex). A `--refresh` of an unchanged folder rewrites `summary.tex` and `comparison.pdf` byte for byte.
+
+`comparison.pdf` is the figure to go with it, drawn at a 6.4 in text width to be included at 100%: mean IoU with the ±1 `sem_iou` band beside the share of boxes at IoU ≥ 0.90 in percent, each run at its own best grid point for the score shown, against the time of one pass. It has no title, every label sits beside its point or is tied to it by a line, runs are named by short model names (L for `sam_l`, 2.1B for `sam2.1_b`) with the key printed beneath, and its fonts are embedded TrueType. A folder measured before the IoU ladder existed gets the mean IoU panel alone, at half the width. `--no_plot` skips it.
 
 ## Plotting another metric
 
@@ -109,7 +127,7 @@ hbb2obb-optimize -c benchmark.yaml --dry_run       # the runs, the grid sizes, t
 hbb2obb-optimize -c benchmark.yaml                 # all runs
 hbb2obb-optimize -c benchmark.yaml --only sam_l    # some of them, by name
 hbb2obb-optimize -c benchmark.yaml --resume        # skip the runs already complete
-hbb2obb-optimize -c benchmark.yaml --refresh       # redraw the plots and summaries only
+hbb2obb-optimize -c benchmark.yaml --refresh       # redraw the plots, summaries and table only
 ```
 
 Each run takes the `defaults` and overrides what it names. A run with no `name` is named after its models, so `[sam_l, sam_b]` writes into `sam_l-sam_b`. Paths resolve against the current working directory. The output folder gets a copy of the config, so the results can be re-run from wherever they end up.
@@ -123,7 +141,7 @@ Each run takes the `defaults` and overrides what it names. A run with no `name` 
 An unknown key stops the benchmark before it starts. On the command line, `--device` overrides every run's `device`.
 
 - `--resume` skips a run whose `results.yaml` already holds every grid point the config asks for, at the same `fragment_ratio`; a run with a changed grid is measured again. `PROVENANCE.txt` then names the runs this invocation measured and the ones it kept.
-- `--refresh` redraws the plots and summaries from each run's `results.yaml` and nothing else, so it works on a results folder copied away from its images, labels and checkpoints, and it leaves `PROVENANCE.txt` as it was. With `--plot_metric` it draws another metric without a single SAM pass:
+- `--refresh` redraws the plots, the summaries and `summary.tex` from each run's `results.yaml` and nothing else, so it works on a results folder copied away from its images, labels and checkpoints, and it leaves `PROVENANCE.txt` as it was. With `--plot_metric` it draws another metric without a single SAM pass:
 
 ```bash
 hbb2obb-optimize -c benchmark.yaml --refresh --plot_metric p90_angle_error

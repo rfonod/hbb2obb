@@ -301,7 +301,7 @@ A YAML lists the runs, and one command produces all of them:
 hbb2obb-optimize -c benchmark.yaml --dry_run   # the runs, the grid size, the total cost
 hbb2obb-optimize -c benchmark.yaml             # all runs in benchmark.yaml
 hbb2obb-optimize -c benchmark.yaml --resume    # continue one that was interrupted
-hbb2obb-optimize -c benchmark.yaml --refresh   # only redraw the plots and the summary
+hbb2obb-optimize -c benchmark.yaml --refresh   # only redraw the plots, the summary and the LaTeX table
 ```
 
 [`data/benchmark.yaml`](data/benchmark.yaml) is a working example: it is the file behind [`data/benchmark_results/`](data/benchmark_results/). The config format is in the [tuning guide](https://rfonod.github.io/hbb2obb/guides/optimize/#benchmarks-several-sweeps-from-one-file).
