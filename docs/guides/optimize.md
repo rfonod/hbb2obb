@@ -43,7 +43,7 @@ benchmark_results/
 ├── summary.md            # the best grid point of every run, in one table
 ├── summary.tex           # the same runs as a LaTeX table
 ├── comparison.png        # best IoU against execution time, one point per run
-├── comparison.pdf        # the same figure as a vector PDF
+├── comparison.pdf        # the comparison drawn for a manuscript
 └── PROVENANCE.txt        # the command, versions, source digest, checkpoint and label hashes
 ```
 
@@ -65,7 +65,7 @@ BEST PARAMETERS:
 
 ![IoU against scale factor for the sam_b run of the sample benchmark](https://raw.githubusercontent.com/rfonod/hbb2obb/main/data/benchmark_results/sam_b/plot.png)
 
-`summary.md`, `summary.tex`, `comparison.png` and `PROVENANCE.txt` cover every run in the output folder, including runs from earlier invocations. `comparison.png` plots each run's best grid point against its execution time, with the Pareto front dashed. Every comparison figure is also written as a PDF beside its PNG, with embedded TrueType fonts:
+`summary.md`, `summary.tex`, `comparison.png` and `PROVENANCE.txt` cover every run in the output folder, including runs from earlier invocations. `comparison.png` plots each run's best grid point against its execution time, with the Pareto front dashed.:
 
 ![Best IoU against execution time for the 18 runs of the sample benchmark](https://raw.githubusercontent.com/rfonod/hbb2obb/main/data/benchmark_results/comparison.png)
 
@@ -91,7 +91,9 @@ hbb2obb images --sam_models sam_l sam_b --imgsz 1280 --scale_factors 0.05 --open
 \end{table}
 ```
 
-Its comment header gives the run, grid point and ground-truth box counts. The sample benchmark ships one: [`data/benchmark_results/summary.tex`](https://github.com/rfonod/hbb2obb/blob/main/data/benchmark_results/summary.tex). The figures to go with it are `comparison.pdf` and `comparison_iou_at_90.pdf`. A `--refresh` of an unchanged folder rewrites `summary.tex` and the PDFs byte for byte.
+Its comment header gives the run, grid point and ground-truth box counts. The sample benchmark ships one: [`data/benchmark_results/summary.tex`](https://github.com/rfonod/hbb2obb/blob/main/data/benchmark_results/summary.tex). A `--refresh` of an unchanged folder rewrites `summary.tex` and `comparison.pdf` byte for byte.
+
+`comparison.pdf` is the figure to go with it, drawn at a 6.4 in text width to be included at 100%: mean IoU with the ±1 `sem_iou` band beside the share of boxes at IoU ≥ 0.90 in percent, each run at its own best grid point for the score shown, against the time of one pass. It has no title, every label sits beside its point or is tied to it by a line, runs are named by short model names (L for `sam_l`, 2.1B for `sam2.1_b`) with the key printed beneath, and its fonts are embedded TrueType. A folder measured before the IoU ladder existed gets the mean IoU panel alone, at half the width. `--no_plot` skips it.
 
 ## Plotting another metric
 
