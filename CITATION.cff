@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 title: "HBB2OBB: Horizontal to Oriented Bounding Box Conversion and Evaluation Tool"
-message: "If you use this software, please consider citing the software."
+message: "If you use this software, please cite the article that describes it (preferred-citation). To credit the software as well, cite the version you used."
 type: software
 authors:
   - given-names: Robert
@@ -17,3 +17,17 @@ url: 'https://github.com/rfonod/hbb2obb'
 license: MIT
 version: 1.12.1
 date-released: '2026-11-08'
+preferred-citation:
+  type: article
+  title: "Consensus Capture in Reference-Based UAV Video Stabilization: A Benchmark on Dynamic Urban Scenes"
+  authors:
+    - given-names: Robert
+      family-names: Fonod
+      affiliation: EPFL
+      orcid: 'https://orcid.org/0000-0002-9434-3156'
+    - given-names: Nikolas
+      family-names: Geroliminis
+  journal: "arXiv preprint arXiv:2611.17190"
+  year: 2026
+  doi: 10.48550/arXiv.2611.17190
+  url: 'https://arxiv.org/abs/2611.17190'

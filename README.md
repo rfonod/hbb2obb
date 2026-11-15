@@ -1,6 +1,6 @@
 # HBB2OBB: Horizontal to Oriented Bounding Box Conversion and Evaluation Tool
 
-[![GitHub Release](https://img.shields.io/github/v/release/rfonod/hbb2obb?include_prereleases)](https://github.com/rfonod/hbb2obb/releases) [![PyPI Version](https://img.shields.io/pypi/v/hbb2obb)](https://pypi.org/project/hbb2obb/) [![PyPi - Total Downloads](https://img.shields.io/pepy/dt/hbb2obb?label=total%20downloads)](https://pepy.tech/project/hbb2obb) [![CI](https://img.shields.io/github/actions/workflow/status/rfonod/hbb2obb/ci.yml?branch=main&label=CI)](https://github.com/rfonod/hbb2obb/actions/workflows/ci.yml) [![Python](https://img.shields.io/badge/python-3.9--3.13-blue)](https://www.python.org/) [![License](https://img.shields.io/github/license/rfonod/hbb2obb)](https://github.com/rfonod/hbb2obb/blob/main/LICENSE) [![GitHub Issues](https://img.shields.io/github/issues/rfonod/hbb2obb)](https://github.com/rfonod/hbb2obb/issues) [![DOI](https://zenodo.org/badge/960660341.svg)](https://doi.org/10.5281/zenodo.15151143) [![Docs](https://img.shields.io/badge/docs-rfonod.github.io%2Fhbb2obb-blue)](https://rfonod.github.io/hbb2obb/) [![Development Status](https://img.shields.io/badge/development-active-brightgreen)](https://github.com/rfonod/hbb2obb)
+[![GitHub Release](https://img.shields.io/github/v/release/rfonod/hbb2obb?include_prereleases)](https://github.com/rfonod/hbb2obb/releases) [![PyPI Version](https://img.shields.io/pypi/v/hbb2obb)](https://pypi.org/project/hbb2obb/) [![PyPi - Total Downloads](https://img.shields.io/pepy/dt/hbb2obb?label=total%20downloads)](https://pepy.tech/project/hbb2obb) [![CI](https://img.shields.io/github/actions/workflow/status/rfonod/hbb2obb/ci.yml?branch=main&label=CI)](https://github.com/rfonod/hbb2obb/actions/workflows/ci.yml) [![Python](https://img.shields.io/badge/python-3.9--3.13-blue)](https://www.python.org/) [![License](https://img.shields.io/github/license/rfonod/hbb2obb)](https://github.com/rfonod/hbb2obb/blob/main/LICENSE) [![GitHub Issues](https://img.shields.io/github/issues/rfonod/hbb2obb)](https://github.com/rfonod/hbb2obb/issues) [![DOI](https://zenodo.org/badge/960660341.svg)](https://doi.org/10.5281/zenodo.15151143) [![arXiv](https://img.shields.io/badge/arXiv-2611.17190-b31b1b.svg)](https://arxiv.org/abs/2611.17190) [![Docs](https://img.shields.io/badge/docs-rfonod.github.io%2Fhbb2obb-blue)](https://rfonod.github.io/hbb2obb/) [![Development Status](https://img.shields.io/badge/development-active-brightgreen)](https://github.com/rfonod/hbb2obb)
 
 **HBB2OBB** converts horizontal (axis-aligned) bounding boxes (HBBs) into oriented (rotated) bounding boxes (OBBs) by using your existing HBB annotations as prompts for segmentation models from the [SAM (Segment Anything Model) family](https://docs.ultralytics.com/models/sam/). It targets object detection tasks where objects appear at arbitrary orientations, such as aerial imagery, satellite data, or traffic monitoring, producing OBBs that tightly encapsulate non-upright objects. Beyond conversion, it ships evaluation, hyperparameter optimization, and annotation format-conversion tools, with both a command-line interface and a Python API.
 
@@ -57,7 +57,7 @@ HBB2OBB integrates with and complements several specialized tools:
 
 - **[Stabilo](https://github.com/rfonod/stabilo) ⚖️**: Python library for video and trajectory stabilization using robust homography transformations. Supports various feature detectors, RANSAC algorithms, and user-defined masks.
 
-- **[Stabilo-Optimize](https://github.com/rfonod/stabilo-optimize) 🎯**: benchmarking and hyperparameter optimization framework for Stabilo. Evaluates stabilization performance through ground truth-free assessment using random perturbations.
+- **[Stabilo Benchmark](https://github.com/rfonod/stabilo-benchmark) 🎯**: benchmark of reference-based UAV video stabilization on dynamic urban scenes, accompanying the paper that describes HBB2OBB ([arXiv:2611.17190](https://arxiv.org/abs/2611.17190)), and the successor of Stabilo-Optimize. HBB2OBB writes the horizontal and oriented boxes behind its object-masking axis ([data record](https://doi.org/10.5281/zenodo.23623540)).
 
 </details>
 
@@ -373,7 +373,8 @@ The score is the product of the **rectangularity** of the fitted contour and the
 <!-- --8<-- [start:songdo] -->
 
 HBB2OBB produced [**Songdo Vision OBB**](https://doi.org/10.5281/zenodo.15050578), the oriented-box
-release of the Songdo Vision v2 aerial vehicle dataset: **274,190 oriented boxes over 5,419 frames**
+release of the [Songdo Vision v2](https://doi.org/10.5281/zenodo.21728430) aerial vehicle dataset
+(also on [Hugging Face](https://huggingface.co/datasets/rfonod/songdo-vision-obb)): **274,190 oriented boxes over 5,419 frames**
 of 4K drone imagery from Songdo, South Korea, one per horizontal box in the source dataset and
 carrying its class and identifier.
 
@@ -398,26 +399,46 @@ one, and the accuracy-against-compute front had two points on it rather than a c
 The full study, every grid point and the figures behind it ship with the dataset as
 `hbb2obb_benchmark/`, and re-run from the config beside them without this repository.
 
+HBB2OBB, Songdo Vision OBB and this validation are described in the paper
+["Consensus Capture in Reference-Based UAV Video Stabilization: A Benchmark on Dynamic Urban Scenes"](https://arxiv.org/abs/2611.17190).
+Its benchmark masks vehicles with 106,921 boxes HBB2OBB detected and converted, published as
+horizontal and oriented boxes with their conversion scores in the paper's
+[data record](https://doi.org/10.5281/zenodo.23623540).
+
 <!-- --8<-- [end:songdo] -->
 
 ## Citation
 
 <!-- --8<-- [start:citation] -->
 
-If you use **HBB2OBB** in your research or software, please cite the archived release:
+If you use **HBB2OBB** in your research, please cite:
 
-```bibtex
-@software{fonod2026hbb2obb,
-  author  = {Fonod, Robert},
-  title   = {HBB2OBB: Horizontal to Oriented Bounding Box Conversion and Evaluation Tool},
-  year    = {2026},
-  license = {MIT},
-  doi     = {10.5281/zenodo.15151143},
-  url     = {https://github.com/rfonod/hbb2obb}
-}
-```
+1. **Preferred Citation:** The paper that describes HBB2OBB:
 
-Each GitHub release is automatically archived to [Zenodo](https://doi.org/10.5281/zenodo.15151143) via the Zenodo–GitHub integration; see [`CITATION.cff`](https://github.com/rfonod/hbb2obb/blob/main/CITATION.cff) for the latest version and DOI.
+    ```bibtex
+    @article{fonod2026benchmark,
+      author  = {Fonod, Robert and Geroliminis, Nikolas},
+      title   = {Consensus Capture in Reference-Based UAV Video Stabilization: A Benchmark on Dynamic Urban Scenes},
+      journal = {arXiv preprint arXiv:2611.17190},
+      year    = {2026},
+      doi     = {10.48550/arXiv.2611.17190}
+    }
+    ```
+
+2. **Repository Citation:** When referencing or building on the code itself (replace `1.x.x` with the version you used):
+
+    ```bibtex
+    @software{fonod2026hbb2obb,
+      author = {Fonod, Robert},
+      title = {HBB2OBB: Horizontal to Oriented Bounding Box Conversion and Evaluation Tool},
+      year = {2026},
+      month = nov,
+      version = {1.x.x},
+      license = {MIT},
+      doi = {10.5281/zenodo.15151143},
+      url = {https://github.com/rfonod/hbb2obb}
+    }
+    ```
 
 <!-- --8<-- [end:citation] -->
 

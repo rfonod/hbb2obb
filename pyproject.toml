@@ -102,6 +102,7 @@ Documentation = "https://rfonod.github.io/hbb2obb/"
 Repository = "https://github.com/rfonod/hbb2obb/"
 Changelog = "https://github.com/rfonod/hbb2obb/releases"
 Issues = "https://github.com/rfonod/hbb2obb/issues/"
+Paper = "https://arxiv.org/abs/2611.17190"
 
 [tool.ruff]
 line-length = 120
